@@ -2,13 +2,12 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import dns from "dns";
 import { promisify } from "util";
-import os from 'os'; // Use ES module import instead of require
+import os from 'os';
 import { isDisposableEmail } from "../client/src/lib/validation";
 import { metricsTracker } from "./metrics";
 import { EmailVerifier } from "./email-verifier";
 import { WorkerPool } from './worker-pool';
-
-const resolveMx = promisify(dns.resolveMx);
+import { rateLimitConfig } from './rate-limit-config';
 
 // Create a worker pool with max workers based on CPU cores
 const workerPool = new WorkerPool(Math.max(2, Math.min(4, os.cpus().length - 1)));
@@ -64,6 +63,8 @@ const CORPORATE_DOMAINS = [
   'teva-api.com',
   'actavis.com'
 ];
+
+const resolveMx = promisify(dns.resolveMx);
 
 export async function validateEmail(email: string, clientIp: string): Promise<ValidationResult> {
   const startTime = Date.now();
@@ -302,6 +303,46 @@ export function registerRoutes(app: Express): Server {
       console.error("Bulk validation error:", error);
       res.status(500).json({
         message: "Internal server error during bulk validation"
+      });
+    }
+  });
+
+  // Rate Limit Configuration Routes
+  app.get("/api/rate-limit-config", (_req, res) => {
+    try {
+      const config = rateLimitConfig.getConfig();
+      res.json(config);
+    } catch (error) {
+      console.error("Error fetching rate limit config:", error);
+      res.status(500).json({
+        message: "Failed to fetch rate limit configuration"
+      });
+    }
+  });
+
+  app.post("/api/rate-limit-config", (req, res) => {
+    try {
+      const newConfig = req.body;
+
+      // Validate the new configuration
+      const validationError = rateLimitConfig.validateConfig(newConfig);
+      if (validationError) {
+        return res.status(400).json({
+          message: validationError
+        });
+      }
+
+      // Update configuration
+      const updatedConfig = rateLimitConfig.updateConfig(newConfig);
+
+      res.json({
+        message: "Rate limit configuration updated successfully",
+        config: updatedConfig
+      });
+    } catch (error) {
+      console.error("Error updating rate limit config:", error);
+      res.status(500).json({
+        message: "Failed to update rate limit configuration"
       });
     }
   });
