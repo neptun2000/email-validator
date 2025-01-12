@@ -4,6 +4,7 @@ import dns from "dns";
 import { promisify } from "util";
 import { isDisposableEmail } from "../client/src/lib/validation";
 import net from "net";
+import { metricsTracker } from "./metrics";
 
 const resolveMx = promisify(dns.resolveMx);
 
@@ -126,14 +127,14 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
 }
 
 export async function validateEmail(email: string): Promise<ValidationResult> {
+  const startTime = Date.now();
   console.log(`Validating email: ${email}`);
 
   try {
     const [account, domain] = email.split("@");
 
     if (!domain || !account) {
-      console.log('Invalid email format: no domain or account found');
-      return {
+      const result = {
         status: "invalid",
         subStatus: "format_error",
         freeEmail: "Unknown",
@@ -149,6 +150,8 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
         message: "Invalid email format",
         isValid: false
       };
+      metricsTracker.recordValidation(startTime, false);
+      return result;
     }
 
     const { firstName, lastName } = extractNameFromEmail(email);
@@ -175,6 +178,7 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       result.status = "invalid";
       result.subStatus = "disposable";
       result.message = "Disposable email addresses are not allowed";
+      metricsTracker.recordValidation(startTime, false);
       return result;
     }
 
@@ -187,6 +191,7 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
         result.status = "invalid";
         result.subStatus = "no_mx_record";
         result.message = "Domain does not have valid mail servers";
+        metricsTracker.recordValidation(startTime, false);
         return result;
       }
 
@@ -205,6 +210,7 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
         result.subStatus = "mailbox_not_found";
         result.message = "Email address does not exist";
         result.isValid = false;
+        metricsTracker.recordValidation(startTime, false);
         return result;
       }
 
@@ -213,6 +219,7 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       result.isValid = true;
 
       console.log('Valid email address found:', email);
+      metricsTracker.recordValidation(startTime, true);
       return result;
 
     } catch (dnsError) {
@@ -220,11 +227,12 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       result.status = "invalid";
       result.subStatus = "dns_error";
       result.message = "Domain appears to be invalid";
+      metricsTracker.recordValidation(startTime, false);
       return result;
     }
   } catch (error) {
     console.error("Email validation error:", error);
-    return {
+    const result = {
       status: "error",
       subStatus: "system_error",
       freeEmail: "Unknown",
@@ -240,10 +248,17 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       message: "Failed to validate email",
       isValid: false
     };
+    metricsTracker.recordValidation(startTime, false);
+    return result;
   }
 }
 
 export function registerRoutes(app: Express): Server {
+  // Add metrics endpoint
+  app.get("/api/metrics", (_req, res) => {
+    res.json(metricsTracker.getMetrics());
+  });
+
   app.post("/api/validate-email", async (req, res) => {
     console.log('Received single validation request:', req.body);
 
