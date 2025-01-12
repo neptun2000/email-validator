@@ -3,6 +3,16 @@
 ## Base URL
 `https://your-replit-url.replit.dev/api`
 
+## Features
+- Email format validation
+- SMTP server verification
+- MX record checking
+- DMARC policy verification
+- Disposable email detection
+- Rate limiting and abuse prevention
+- Detailed validation reports
+- Bulk validation support
+
 ## Rate Limiting
 The API implements rate limiting to ensure fair usage:
 - 100 requests per hour per IP address
@@ -38,12 +48,19 @@ Validates a single email address for deliverability and existence.
   "smtpProvider": "mx1",
   "mxFound": "Yes",
   "mxRecord": "mx1.domain.com",
+  "dmarcPolicy": "reject",
   "firstName": "Example",
   "lastName": "Unknown",
   "message": "Valid email address",
   "isValid": true
 }
 ```
+
+The `dmarcPolicy` field indicates the domain's DMARC policy:
+- `reject`: Emails failing DMARC should be rejected
+- `quarantine`: Emails failing DMARC should be quarantined
+- `none`: No specific action required for DMARC failures
+- `null`: No DMARC record found
 
 ### Validate Multiple Emails
 `POST /api/validate-emails`

@@ -1,13 +1,24 @@
+import { EventEmitter } from 'events';
+import net from 'net';
 import dns from 'dns';
 import { promisify } from 'util';
 import { SmtpVerifier, VerificationError } from './smtp-verifier';
 
 const resolveMx = promisify(dns.resolveMx);
+const resolveTxt = promisify(dns.resolveTxt);
+
+interface DmarcRecord {
+  policy: string;
+  subdomainPolicy?: string;
+  percentage?: number;
+  reportFormat?: string;
+}
 
 interface VerificationResult {
   valid: boolean;
   reason?: string;
   mxRecord?: string;
+  dmarcPolicy?: string | null;
   logs?: any[];
 }
 
@@ -40,22 +51,47 @@ export class EmailVerifier {
     return true;
   }
 
+  static async getDmarcRecord(domain: string): Promise<DmarcRecord | null> {
+    try {
+      const dmarcDomain = `_dmarc.${domain}`;
+      const records = await resolveTxt(dmarcDomain);
+
+      for (const recordSet of records) {
+        const record = recordSet.join('');
+        if (record.startsWith('v=DMARC1')) {
+          const tags = record.split(';').map(tag => tag.trim());
+          const policy = tags.find(t => t.startsWith('p='))?.split('=')[1] || 'none';
+          const subdomainPolicy = tags.find(t => t.startsWith('sp='))?.split('=')[1];
+          const percentage = parseInt(tags.find(t => t.startsWith('pct='))?.split('=')[1] || '100');
+          const reportFormat = tags.find(t => t.startsWith('rf='))?.split('=')[1];
+
+          return {
+            policy,
+            subdomainPolicy,
+            percentage,
+            reportFormat
+          };
+        }
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
   static async verify(email: string, clientIp: string): Promise<VerificationResult> {
     if (!await this.checkRateLimit(clientIp)) {
       return { valid: false, reason: 'Rate limit exceeded' };
     }
 
-    // Basic format check
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return { valid: false, reason: 'Invalid email format' };
     }
 
     const [localPart, domain] = email.split('@');
-
     const verifier = new SmtpVerifier();
 
-    // Subscribe to logs for real-time monitoring
     verifier.on('log', (log) => {
       console.log(`[Email Verification] ${log.stage}:`, {
         success: log.success,
@@ -67,30 +103,36 @@ export class EmailVerifier {
     });
 
     try {
-      const result = await verifier.verify(email);
-      console.log('Verification completed:', result);
+      const dmarcRecord = await this.getDmarcRecord(domain);
+      console.log('DMARC record:', dmarcRecord);
 
-      if (!result.valid) {
+      const smtpResult = await verifier.verify(email);
+      console.log('SMTP verification completed:', smtpResult);
+
+      if (!smtpResult.valid) {
         return {
           valid: false,
-          reason: result.reason,
-          mxRecord: result.mxRecord,
-          logs: result.logs
+          reason: smtpResult.reason,
+          mxRecord: smtpResult.mxRecord,
+          dmarcPolicy: dmarcRecord?.policy ?? null,
+          logs: smtpResult.logs
         };
       }
 
       return {
         valid: true,
-        reason: result.reason,
-        mxRecord: result.mxRecord,
-        logs: result.logs
+        reason: smtpResult.reason,
+        mxRecord: smtpResult.mxRecord,
+        dmarcPolicy: dmarcRecord?.policy ?? null,
+        logs: smtpResult.logs
       };
     } catch (error: any) {
       console.error('Verification error:', error);
       return {
         valid: false,
         reason: error.message || 'Verification failed',
-        logs: verifier['logs'] // Access internal logs
+        dmarcPolicy: null,
+        logs: verifier['logs']
       };
     }
   }

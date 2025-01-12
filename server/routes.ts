@@ -24,6 +24,7 @@ interface ValidationResult {
   smtpProvider: string;
   mxFound: string;
   mxRecord: string | null;
+  dmarcPolicy: string | null; // Added DMARC policy
   firstName: string;
   lastName: string;
   message: string;
@@ -79,6 +80,7 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
         smtpProvider: "Unknown",
         mxFound: "No",
         mxRecord: null,
+        dmarcPolicy: null,
         firstName: "Unknown",
         lastName: "Unknown",
         message: "Invalid email format",
@@ -101,6 +103,7 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
       smtpProvider: "Unknown",
       mxFound: "No",
       mxRecord: null,
+      dmarcPolicy: null,
       firstName,
       lastName,
       message: "",
@@ -122,6 +125,7 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
 
     result.mxFound = verificationResult.mxRecord ? "Yes" : "No";
     result.mxRecord = verificationResult.mxRecord || null;
+    result.dmarcPolicy = verificationResult.dmarcPolicy || null;
     result.smtpProvider = verificationResult.mxRecord ?
       verificationResult.mxRecord.split('.')[0] : "Unknown";
 
@@ -145,7 +149,6 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
     result.isValid = true;
     metricsTracker.recordValidation(startTime, true);
     return result;
-
   } catch (error) {
     console.error("Email validation error:", error);
     const result = {
@@ -159,6 +162,7 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
       smtpProvider: "Unknown",
       mxFound: "No",
       mxRecord: null,
+      dmarcPolicy: null,
       firstName: "Unknown",
       lastName: "Unknown",
       message: "Failed to validate email",
@@ -278,6 +282,7 @@ export function registerRoutes(app: Express): Server {
             smtpProvider: "Unknown",
             mxFound: "No",
             mxRecord: null,
+            dmarcPolicy: null,
             firstName: "Unknown",
             lastName: "Unknown",
             message: "Failed to validate email",
