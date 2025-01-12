@@ -237,7 +237,7 @@ async function validateEmail(email: string): Promise<ValidationResult> {
 
 export function registerRoutes(app: Express): Server {
   app.post("/api/validate-email", async (req, res) => {
-    console.log('Received validation request:', req.body);
+    console.log('Received single validation request:', req.body);
 
     try {
       const { email } = req.body;
@@ -254,6 +254,59 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error("Email validation error:", error);
       res.status(500).send("Internal server error during validation");
+    }
+  });
+
+  app.post("/api/validate-emails", async (req, res) => {
+    console.log('Received bulk validation request:', req.body);
+
+    try {
+      const { emails } = req.body;
+
+      if (!Array.isArray(emails)) {
+        console.log('Invalid request: emails must be an array');
+        return res.status(400).send("Emails must be provided as an array");
+      }
+
+      if (emails.length > 100) {
+        console.log('Invalid request: too many emails');
+        return res.status(400).send("Maximum 100 emails allowed per request");
+      }
+
+      // Process emails in parallel with a concurrency limit
+      const validationPromises = emails.map(async (email) => {
+        try {
+          const result = await validateEmail(email);
+          return { ...result, email };
+        } catch (error) {
+          console.error(`Error validating email ${email}:`, error);
+          return {
+            email,
+            status: "error",
+            subStatus: "system_error",
+            freeEmail: "Unknown",
+            didYouMean: "Unknown",
+            account: "Unknown",
+            domain: "Unknown",
+            domainAgeDays: "Unknown",
+            smtpProvider: "Unknown",
+            mxFound: "No",
+            mxRecord: null,
+            firstName: "Unknown",
+            lastName: "Unknown",
+            message: "Failed to validate email",
+            isValid: false
+          };
+        }
+      });
+
+      const results = await Promise.all(validationPromises);
+      console.log(`Completed bulk validation for ${emails.length} emails`);
+
+      return res.json(results);
+    } catch (error) {
+      console.error("Bulk validation error:", error);
+      res.status(500).send("Internal server error during bulk validation");
     }
   });
 
