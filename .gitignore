@@ -4,3 +4,14 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+.env
+__pycache__/
+*.pyc
+.vite/
+.replit.nix
+migrations/*
+!migrations/.keep
+.upm/
+.config/
+.node-gyp/
+.npm/
