@@ -6,28 +6,99 @@ import { isDisposableEmail } from "../client/src/lib/validation";
 
 const resolveMx = promisify(dns.resolveMx);
 
-async function validateEmail(email: string): Promise<{ isValid: boolean; message: string }> {
+interface ValidationResult {
+  status: string;
+  subStatus: string | null;
+  freeEmail: string;
+  didYouMean: string;
+  account: string;
+  domain: string;
+  domainAgeDays: string;
+  smtpProvider: string;
+  mxFound: string;
+  mxRecord: string | null;
+  firstName: string;
+  lastName: string;
+  message: string;
+  isValid: boolean;
+}
+
+function extractNameFromEmail(email: string): { firstName: string; lastName: string } {
+  const [account] = email.split('@');
+  const nameParts = account
+    .replace(/[._]/g, ' ') // Replace dots and underscores with spaces
+    .split(' ')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+
+  if (nameParts.length >= 2) {
+    return {
+      firstName: nameParts[0],
+      lastName: nameParts.slice(1).join(' ')
+    };
+  }
+
+  return {
+    firstName: nameParts[0] || 'Unknown',
+    lastName: 'Unknown'
+  };
+}
+
+async function validateEmail(email: string): Promise<ValidationResult> {
   console.log(`Validating email: ${email}`);
 
   try {
-    // Extract domain from email
-    const [, domain] = email.split("@");
+    // Extract domain and account from email
+    const [account, domain] = email.split("@");
 
-    if (!domain) {
-      console.log('Invalid email format: no domain found');
+    if (!domain || !account) {
+      console.log('Invalid email format: no domain or account found');
       return {
-        isValid: false,
+        status: "invalid",
+        subStatus: "format_error",
+        freeEmail: "Unknown",
+        didYouMean: "Unknown",
+        account,
+        domain: domain || "Unknown",
+        domainAgeDays: "Unknown",
+        smtpProvider: "Unknown",
+        mxFound: "No",
+        mxRecord: null,
+        firstName: "Unknown",
+        lastName: "Unknown",
         message: "Invalid email format",
+        isValid: false
       };
     }
+
+    // Extract name information
+    const { firstName, lastName } = extractNameFromEmail(email);
+
+    // Initialize result object
+    const result: ValidationResult = {
+      status: "checking",
+      subStatus: null,
+      freeEmail: "No", // Assuming corporate email by default
+      didYouMean: "Unknown",
+      account,
+      domain,
+      domainAgeDays: "Unknown",
+      smtpProvider: "Unknown",
+      mxFound: "No",
+      mxRecord: null,
+      firstName,
+      lastName,
+      message: "",
+      isValid: false
+    };
 
     // Check if it's a disposable email
     if (isDisposableEmail(domain)) {
       console.log('Disposable email detected:', domain);
-      return {
-        isValid: false,
-        message: "Disposable email addresses are not allowed",
-      };
+      result.status = "invalid";
+      result.subStatus = "disposable";
+      result.message = "Disposable email addresses are not allowed";
+      return result;
     }
 
     // Verify domain has MX records
@@ -37,30 +108,48 @@ async function validateEmail(email: string): Promise<{ isValid: boolean; message
 
       if (!mxRecords || mxRecords.length === 0) {
         console.log('No MX records found for domain:', domain);
-        return {
-          isValid: false,
-          message: "Domain does not have valid mail servers",
-        };
+        result.status = "invalid";
+        result.subStatus = "no_mx_record";
+        result.message = "Domain does not have valid mail servers";
+        return result;
       }
 
+      // Sort MX records by priority and get the primary one
+      const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
+      result.mxFound = "Yes";
+      result.mxRecord = primaryMx.exchange;
+      result.smtpProvider = primaryMx.exchange.split('.')[0];
+      result.status = "valid";
+      result.message = "Email domain appears to be valid";
+      result.isValid = true;
+
       console.log('Valid MX records found for domain:', domain);
-      return {
-        isValid: true,
-        message: "Email domain appears to be valid",
-      };
+      return result;
 
     } catch (dnsError) {
       console.error('DNS error:', dnsError);
-      return {
-        isValid: false,
-        message: "Domain appears to be invalid",
-      };
+      result.status = "invalid";
+      result.subStatus = "dns_error";
+      result.message = "Domain appears to be invalid";
+      return result;
     }
   } catch (error) {
     console.error("Email validation error:", error);
     return {
-      isValid: false,
+      status: "error",
+      subStatus: "system_error",
+      freeEmail: "Unknown",
+      didYouMean: "Unknown",
+      account: "Unknown",
+      domain: "Unknown",
+      domainAgeDays: "Unknown",
+      smtpProvider: "Unknown",
+      mxFound: "No",
+      mxRecord: null,
+      firstName: "Unknown",
+      lastName: "Unknown",
       message: "Failed to validate email",
+      isValid: false
     };
   }
 }

@@ -14,12 +14,30 @@ interface FormData {
   email: string;
 }
 
+interface ValidationResult {
+  status: string;
+  subStatus: string | null;
+  freeEmail: string;
+  didYouMean: string;
+  account: string;
+  domain: string;
+  domainAgeDays: string;
+  smtpProvider: string;
+  mxFound: string;
+  mxRecord: string | null;
+  firstName: string;
+  lastName: string;
+  message: string;
+  isValid: boolean;
+}
+
 type ValidationStatus = "idle" | "invalid" | "valid" | "checking";
 
 export function EmailValidator() {
   const [status, setStatus] = useState<ValidationStatus>("idle");
+  const [result, setResult] = useState<ValidationResult | null>(null);
   const { toast } = useToast();
-  
+
   const form = useForm<FormData>({
     defaultValues: {
       email: "",
@@ -33,15 +51,16 @@ export function EmailValidator() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      
+
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      
+
       return response.json();
     },
     onSuccess: (data) => {
       setStatus(data.isValid ? "valid" : "invalid");
+      setResult(data);
       toast({
         title: data.isValid ? "Valid Email" : "Invalid Email",
         description: data.message,
@@ -50,6 +69,7 @@ export function EmailValidator() {
     },
     onError: (error) => {
       setStatus("invalid");
+      setResult(null);
       toast({
         title: "Error",
         description: error.message,
@@ -61,9 +81,10 @@ export function EmailValidator() {
   const onSubmit = async (data: FormData) => {
     if (!isValidEmailFormat(data.email)) {
       setStatus("invalid");
+      setResult(null);
       return;
     }
-    
+
     setStatus("checking");
     validateEmail.mutate(data.email);
   };
@@ -71,6 +92,7 @@ export function EmailValidator() {
   const clearForm = () => {
     form.reset();
     setStatus("idle");
+    setResult(null);
   };
 
   return (
@@ -112,7 +134,7 @@ export function EmailValidator() {
                 </FormItem>
               )}
             />
-            
+
             <Button 
               type="submit" 
               className="w-full"
@@ -129,6 +151,50 @@ export function EmailValidator() {
             </Button>
           </form>
         </Form>
+
+        {result && (
+          <div className="mt-6 space-y-2 text-sm">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="font-semibold">Status:</div>
+              <div className={result.isValid ? "text-green-600" : "text-red-600"}>
+                {result.status.toUpperCase()}
+              </div>
+
+              <div className="font-semibold">Sub-Status:</div>
+              <div>{result.subStatus || "None"}</div>
+
+              <div className="font-semibold">Free Email:</div>
+              <div>{result.freeEmail}</div>
+
+              <div className="font-semibold">Did You Mean:</div>
+              <div>{result.didYouMean}</div>
+
+              <div className="font-semibold">Account:</div>
+              <div>{result.account}</div>
+
+              <div className="font-semibold">Domain:</div>
+              <div>{result.domain}</div>
+
+              <div className="font-semibold">Domain Age Days:</div>
+              <div>{result.domainAgeDays}</div>
+
+              <div className="font-semibold">SMTP Provider:</div>
+              <div>{result.smtpProvider}</div>
+
+              <div className="font-semibold">MX Found:</div>
+              <div>{result.mxFound}</div>
+
+              <div className="font-semibold">MX Record:</div>
+              <div>{result.mxRecord || "None"}</div>
+
+              <div className="font-semibold">First Name:</div>
+              <div>{result.firstName}</div>
+
+              <div className="font-semibold">Last Name:</div>
+              <div>{result.lastName}</div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
