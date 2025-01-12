@@ -48,12 +48,18 @@ export function CustomEmailTester() {
 
   const form = useForm<FormData>({
     defaultValues: {
-      emailList: "",
+      emailList: ""
     },
   });
 
   const testEmails = useMutation({
-    mutationFn: async (emails: string[]) => {
+    mutationFn: async (data: { emailList: string }) => {
+      // Split the emailList string into an array and clean up the entries
+      const emails = data.emailList
+        .split(/[\n,]/)
+        .map(email => email.trim())
+        .filter(Boolean);
+
       const response = await fetch("/api/validate-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +91,7 @@ export function CustomEmailTester() {
   });
 
   const onSubmit = async (data: FormData) => {
-    testEmails.mutate(data.emailList);
+    testEmails.mutate(data);
   };
 
   const clearForm = () => {
