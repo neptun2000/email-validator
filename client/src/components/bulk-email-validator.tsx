@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { Mail, Loader2, X } from "lucide-react";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
@@ -8,11 +9,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
 
-interface FormData {
-  emails: string;
-}
+const formSchema = z.object({
+  emails: z.string()
+    .min(1, "Please enter at least one email address")
+    .transform(value => value.split(/[\n,]/).map(email => email.trim()).filter(Boolean))
+    .refine(
+      emails => emails.length > 0,
+      "Please enter at least one valid email address"
+    )
+    .refine(
+      emails => emails.length <= 100,
+      "Maximum 100 emails allowed per request"
+    )
+    .refine(
+      emails => emails.every(email => isValidEmailFormat(email)),
+      "One or more email addresses are invalid"
+    )
+});
+
+type FormData = z.infer<typeof formSchema>;
 
 interface ValidationResult {
   email: string;
@@ -34,10 +52,10 @@ interface ValidationResult {
 
 export function BulkEmailValidator() {
   const [results, setResults] = useState<ValidationResult[]>([]);
-  const [validating, setValidating] = useState(false);
   const { toast } = useToast();
 
   const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       emails: "",
     },
@@ -52,21 +70,20 @@ export function BulkEmailValidator() {
       });
 
       if (!response.ok) {
-        throw new Error(await response.text());
+        const errorText = await response.text();
+        throw new Error(errorText);
       }
 
-      return response.json();
+      return response.json() as Promise<ValidationResult[]>;
     },
     onSuccess: (data) => {
       setResults(data);
-      setValidating(false);
       toast({
         title: "Validation Complete",
-        description: `Validated ${data.length} email addresses`,
+        description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
       });
     },
-    onError: (error) => {
-      setValidating(false);
+    onError: (error: Error) => {
       setResults([]);
       toast({
         title: "Error",
@@ -77,32 +94,7 @@ export function BulkEmailValidator() {
   });
 
   const onSubmit = async (data: FormData) => {
-    const emailList = data.emails
-      .split(/[\n,]/)
-      .map(email => email.trim())
-      .filter(email => email.length > 0);
-
-    if (emailList.length === 0) {
-      toast({
-        title: "Error",
-        description: "Please enter at least one email address",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const invalidEmails = emailList.filter(email => !isValidEmailFormat(email));
-    if (invalidEmails.length > 0) {
-      toast({
-        title: "Error",
-        description: `Invalid email format: ${invalidEmails.join(", ")}`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setValidating(true);
-    validateEmails.mutate(emailList);
+    validateEmails.mutate(data.emails);
   };
 
   const clearForm = () => {
@@ -125,7 +117,8 @@ export function BulkEmailValidator() {
                       <Textarea
                         {...field}
                         placeholder="Enter email addresses (one per line or comma-separated)"
-                        className="min-h-[100px] pl-10"
+                        className="min-h-[100px] pl-10 pr-8"
+                        disabled={validateEmails.isPending}
                       />
                       <Mail className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
                       {field.value && (
@@ -135,6 +128,7 @@ export function BulkEmailValidator() {
                           size="sm"
                           className="absolute right-2 top-2 h-5 w-5 p-0"
                           onClick={clearForm}
+                          disabled={validateEmails.isPending}
                         >
                           <X className="h-4 w-4" />
                         </Button>
@@ -149,12 +143,12 @@ export function BulkEmailValidator() {
             <Button 
               type="submit" 
               className="w-full"
-              disabled={validating}
+              disabled={validateEmails.isPending}
             >
-              {validating ? (
+              {validateEmails.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Validating...
+                  Validating {form.getValues().emails.split(/[\n,]/).filter(Boolean).length} emails...
                 </>
               ) : (
                 "Validate Emails"

@@ -1,7 +1,6 @@
 import { EmailValidator } from "@/components/email-validator";
 import { BulkEmailValidator } from "@/components/bulk-email-validator";
 import { ValidationMetrics } from "@/components/validation-metrics";
-import { RateLimitWizard } from "@/components/rate-limit-wizard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Home() {
@@ -16,11 +15,10 @@ export default function Home() {
         </div>
 
         <Tabs defaultValue="validation" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="validation">Validation</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Check</TabsTrigger>
             <TabsTrigger value="metrics">Statistics</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="validation">
@@ -33,10 +31,6 @@ export default function Home() {
 
           <TabsContent value="metrics">
             <ValidationMetrics />
-          </TabsContent>
-
-          <TabsContent value="settings">
-            <RateLimitWizard />
           </TabsContent>
         </Tabs>
       </div>
