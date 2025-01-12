@@ -20,18 +20,18 @@ export function RateLimitWizard() {
   const queryClient = useQueryClient();
   const [config, setConfig] = useState<RateLimitConfig | null>(null);
 
-  const { data: initialConfig, isLoading } = useQuery<{ config: RateLimitConfig }>({
+  const { data: initialConfig, isLoading, error } = useQuery({
     queryKey: ['/api/rate-limit-config'],
     queryFn: async () => {
       const response = await fetch('/api/rate-limit-config');
       if (!response.ok) {
         throw new Error('Failed to fetch configuration');
       }
-      return response.json();
+      return response.json() as Promise<RateLimitConfig>;
     },
     onSuccess: (data) => {
-      if (!config && data.config) {
-        setConfig(data.config);
+      if (!config) {
+        setConfig(data);
       }
     }
   });
@@ -54,12 +54,14 @@ export function RateLimitWizard() {
       return response.json();
     },
     onSuccess: (data) => {
-      setConfig(data.config);
-      queryClient.invalidateQueries({ queryKey: ['/api/rate-limit-config'] });
-      toast({
-        title: "Success",
-        description: "Rate limit configuration updated successfully",
-      });
+      if (data.config) {
+        setConfig(data.config);
+        queryClient.invalidateQueries({ queryKey: ['/api/rate-limit-config'] });
+        toast({
+          title: "Success",
+          description: "Rate limit configuration updated successfully",
+        });
+      }
     },
     onError: (error: Error) => {
       toast({
@@ -69,6 +71,18 @@ export function RateLimitWizard() {
       });
     },
   });
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="text-center text-red-500">
+            Failed to load configuration: {error instanceof Error ? error.message : 'Unknown error'}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (isLoading || !config) {
     return (
