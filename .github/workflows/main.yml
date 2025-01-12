@@ -46,4 +46,12 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
+          NODE_ENV: test
         run: npm test
+
+      - name: Upload test coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: warn
