@@ -21,7 +21,7 @@ const PREDEFINED_EMAILS = [
   'vkroz@amazon.com',
   'mark.maalouf@tevapharm.com',
   'smquadrat@gmail.com'
-].join('\n');
+];
 
 const formSchema = z.object({
   emails: z.string()
@@ -41,7 +41,9 @@ const formSchema = z.object({
     )
 });
 
-type FormData = z.infer<typeof formSchema>;
+type FormData = {
+  emails: string;
+};
 
 interface ValidationResult {
   email: string;
@@ -73,7 +75,8 @@ export function BulkEmailValidator() {
   });
 
   const validateEmails = useMutation({
-    mutationFn: async (emails: string[]) => {
+    mutationFn: async (data: FormData) => {
+      const emails = data.emails.split(/[\n,]/).map(email => email.trim()).filter(Boolean);
       const response = await fetch("/api/validate-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -104,8 +107,8 @@ export function BulkEmailValidator() {
     },
   });
 
-  const onSubmit = async (data: FormData) => {
-    validateEmails.mutate(data.emails);
+  const onSubmit = (data: FormData) => {
+    validateEmails.mutate(data);
   };
 
   const clearForm = () => {
@@ -114,7 +117,7 @@ export function BulkEmailValidator() {
   };
 
   const loadPredefinedEmails = () => {
-    form.setValue('emails', PREDEFINED_EMAILS);
+    form.setValue('emails', PREDEFINED_EMAILS.join('\n'));
   };
 
   return (
@@ -173,7 +176,7 @@ export function BulkEmailValidator() {
               {validateEmails.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Validating {form.getValues().emails.split(/[\n,]/).filter(Boolean).length} emails...
+                  Validating emails...
                 </>
               ) : (
                 "Validate Emails"
@@ -199,8 +202,7 @@ export function BulkEmailValidator() {
                   <TableRow key={index}>
                     <TableCell>{result.email}</TableCell>
                     <TableCell className={result.isValid ? "text-green-600" : "text-red-600"}>
-                      {result.status.toUpperCase()}
-                      {result.subStatus && ` (${result.subStatus})`}
+                      {result.status}
                     </TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>{result.domain}</TableCell>
