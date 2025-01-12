@@ -7,6 +7,25 @@ import { SmtpVerifier, VerificationError } from './smtp-verifier';
 const resolveMx = promisify(dns.resolveMx);
 const resolveTxt = promisify(dns.resolveTxt);
 
+// List of known corporate domains that commonly use catch-all configuration
+const CORPORATE_DOMAINS = new Set([
+  'amazon.com',
+  'microsoft.com',
+  'google.com',
+  'apple.com',
+  'facebook.com',
+  'meta.com',
+  'netflix.com',
+  'oracle.com',
+  'salesforce.com',
+  'ibm.com',
+  'intel.com',
+  'cisco.com',
+  'adobe.com',
+  'vmware.com',
+  'sap.com'
+]);
+
 interface DmarcRecord {
   policy: string;
   subdomainPolicy?: string;
@@ -20,6 +39,8 @@ interface VerificationResult {
   mxRecord?: string;
   dmarcPolicy?: string | null;
   logs?: any[];
+  isCorporate?: boolean;
+  isCatchAll?: boolean;
 }
 
 // Rate limiting map to prevent abuse
@@ -28,6 +49,12 @@ const RATE_LIMIT_WINDOW = 3600000; // 1 hour in milliseconds
 const MAX_ATTEMPTS = 100; // Maximum attempts per hour per IP
 
 export class EmailVerifier {
+  static isCorporateDomain(domain: string): boolean {
+    return CORPORATE_DOMAINS.has(domain.toLowerCase()) ||
+           domain.endsWith('.edu') ||
+           domain.endsWith('.gov');
+  }
+
   static async checkRateLimit(ip: string): Promise<boolean> {
     const now = Date.now();
     const windowStart = now - RATE_LIMIT_WINDOW;
@@ -104,10 +131,24 @@ export class EmailVerifier {
 
     try {
       const dmarcRecord = await this.getDmarcRecord(domain);
+      const isCorporate = this.isCorporateDomain(domain);
       console.log('DMARC record:', dmarcRecord);
 
       const smtpResult = await verifier.verify(email);
       console.log('SMTP verification completed:', smtpResult);
+
+      // Special handling for corporate domains with catch-all configuration
+      if (smtpResult.isCatchAll && isCorporate) {
+        return {
+          valid: true,
+          reason: 'Valid corporate email domain with catch-all configuration',
+          mxRecord: smtpResult.mxRecord,
+          dmarcPolicy: dmarcRecord?.policy ?? null,
+          logs: smtpResult.logs,
+          isCorporate: true,
+          isCatchAll: true
+        };
+      }
 
       if (!smtpResult.valid) {
         return {
@@ -115,16 +156,18 @@ export class EmailVerifier {
           reason: smtpResult.reason,
           mxRecord: smtpResult.mxRecord,
           dmarcPolicy: dmarcRecord?.policy ?? null,
-          logs: smtpResult.logs
+          logs: smtpResult.logs,
+          isCorporate
         };
       }
 
       return {
         valid: true,
-        reason: smtpResult.reason,
+        reason: isCorporate ? 'Valid corporate email address' : 'Valid email address',
         mxRecord: smtpResult.mxRecord,
         dmarcPolicy: dmarcRecord?.policy ?? null,
-        logs: smtpResult.logs
+        logs: smtpResult.logs,
+        isCorporate
       };
     } catch (error: any) {
       console.error('Verification error:', error);

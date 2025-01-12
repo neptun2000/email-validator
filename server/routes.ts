@@ -28,11 +28,114 @@ interface ValidationResult {
   smtpProvider: string;
   mxFound: string;
   mxRecord: string | null;
-  dmarcPolicy: string | null; // Added DMARC policy
+  dmarcPolicy: string | null;
   firstName: string;
   lastName: string;
   message: string;
   isValid: boolean;
+}
+
+export async function validateEmail(email: string, clientIp: string): Promise<ValidationResult> {
+  const startTime = Date.now();
+  console.log(`Starting validation for email: ${email}`);
+
+  try {
+    const [account, domain] = email.split("@");
+
+    if (!domain || !account) {
+      console.log('Invalid email format:', email);
+      return {
+        status: "invalid",
+        subStatus: "format_error",
+        freeEmail: "Unknown",
+        didYouMean: "",
+        account: account || "",
+        domain: domain || "",
+        domainAgeDays: "Unknown",
+        smtpProvider: "Unknown",
+        mxFound: "No",
+        mxRecord: null,
+        dmarcPolicy: null,
+        firstName: "Unknown",
+        lastName: "Unknown",
+        message: "Invalid email format",
+        isValid: false
+      };
+    }
+
+    const { firstName, lastName } = extractNameFromEmail(email);
+
+    if (isDisposableEmail(domain)) {
+      console.log('Disposable email detected:', domain);
+      return {
+        status: "invalid",
+        subStatus: "disposable",
+        freeEmail: "No",
+        didYouMean: "",
+        account,
+        domain,
+        domainAgeDays: "Unknown",
+        smtpProvider: "Unknown",
+        mxFound: "No",
+        mxRecord: null,
+        dmarcPolicy: null,
+        firstName,
+        lastName,
+        message: "Disposable email addresses are not allowed",
+        isValid: false
+      };
+    }
+
+    // Verify email using EmailVerifier
+    const verificationResult = await EmailVerifier.verify(email, clientIp);
+    console.log('Verification result:', verificationResult);
+
+    // Special handling for corporate domains
+    const status = verificationResult.isCatchAll && verificationResult.isCorporate 
+      ? "catch-all" 
+      : verificationResult.valid ? "valid" : "invalid";
+
+    const result: ValidationResult = {
+      status,
+      subStatus: verificationResult.reason || null,
+      freeEmail: "No",
+      didYouMean: "",
+      account,
+      domain,
+      domainAgeDays: "Unknown",
+      smtpProvider: verificationResult.mxRecord ? verificationResult.mxRecord.split('.')[0] : "Unknown",
+      mxFound: verificationResult.mxRecord ? "Yes" : "No",
+      mxRecord: verificationResult.mxRecord || null,
+      dmarcPolicy: verificationResult.dmarcPolicy || null,
+      firstName,
+      lastName,
+      message: verificationResult.reason || (verificationResult.valid ? "Valid email address" : "Invalid email address"),
+      isValid: verificationResult.valid
+    };
+
+    metricsTracker.recordValidation(startTime, verificationResult.valid);
+    return result;
+  } catch (error) {
+    console.error("Email validation error:", error);
+    metricsTracker.recordValidation(startTime, false);
+    return {
+      status: "error",
+      subStatus: "system_error",
+      freeEmail: "Unknown",
+      didYouMean: "",
+      account: "Unknown",
+      domain: "Unknown",
+      domainAgeDays: "Unknown",
+      smtpProvider: "Unknown",
+      mxFound: "No",
+      mxRecord: null,
+      dmarcPolicy: null,
+      firstName: "Unknown",
+      lastName: "Unknown",
+      message: error instanceof Error ? error.message : "Failed to validate email",
+      isValid: false
+    };
+  }
 }
 
 function extractNameFromEmail(email: string): { firstName: string; lastName: string } {
@@ -66,119 +169,6 @@ const CORPORATE_DOMAINS = [
 
 const resolveMx = promisify(dns.resolveMx);
 
-export async function validateEmail(email: string, clientIp: string): Promise<ValidationResult> {
-  const startTime = Date.now();
-  console.log(`Starting validation for email: ${email}`);
-
-  try {
-    const [account, domain] = email.split("@");
-
-    if (!domain || !account) {
-      console.log('Invalid email format:', email);
-      const result = {
-        status: "invalid",
-        subStatus: "format_error",
-        freeEmail: "Unknown",
-        didYouMean: "Unknown",
-        account,
-        domain: domain || "Unknown",
-        domainAgeDays: "Unknown",
-        smtpProvider: "Unknown",
-        mxFound: "No",
-        mxRecord: null,
-        dmarcPolicy: null,
-        firstName: "Unknown",
-        lastName: "Unknown",
-        message: "Invalid email format",
-        isValid: false
-      };
-      metricsTracker.recordValidation(startTime, false);
-      return result;
-    }
-
-    const { firstName, lastName } = extractNameFromEmail(email);
-
-    const result: ValidationResult = {
-      status: "checking",
-      subStatus: null,
-      freeEmail: "No",
-      didYouMean: "Unknown",
-      account,
-      domain,
-      domainAgeDays: "Unknown",
-      smtpProvider: "Unknown",
-      mxFound: "No",
-      mxRecord: null,
-      dmarcPolicy: null,
-      firstName,
-      lastName,
-      message: "",
-      isValid: false
-    };
-
-    if (isDisposableEmail(domain)) {
-      console.log('Disposable email detected:', domain);
-      result.status = "invalid";
-      result.subStatus = "disposable";
-      result.message = "Disposable email addresses are not allowed";
-      metricsTracker.recordValidation(startTime, false);
-      return result;
-    }
-
-    // Verify email using our EmailVerifier
-    const verificationResult = await EmailVerifier.verify(email, clientIp);
-    console.log('Verification result:', verificationResult);
-
-    result.mxFound = verificationResult.mxRecord ? "Yes" : "No";
-    result.mxRecord = verificationResult.mxRecord || null;
-    result.dmarcPolicy = verificationResult.dmarcPolicy || null;
-    result.smtpProvider = verificationResult.mxRecord ?
-      verificationResult.mxRecord.split('.')[0] : "Unknown";
-
-    if (!verificationResult.valid) {
-      result.status = "invalid";
-      result.subStatus = "verification_failed";
-      result.message = verificationResult.reason || "Email verification failed";
-      metricsTracker.recordValidation(startTime, false);
-      return result;
-    }
-
-    // Additional check for corporate domains
-    const isCorporateDomain = CORPORATE_DOMAINS.includes(domain);
-    if (isCorporateDomain) {
-      result.message = "Valid corporate email address";
-    } else {
-      result.message = "Valid email address";
-    }
-
-    result.status = "valid";
-    result.isValid = true;
-    metricsTracker.recordValidation(startTime, true);
-    return result;
-  } catch (error) {
-    console.error("Email validation error:", error);
-    const result = {
-      status: "error",
-      subStatus: "system_error",
-      freeEmail: "Unknown",
-      didYouMean: "Unknown",
-      account: "Unknown",
-      domain: "Unknown",
-      domainAgeDays: "Unknown",
-      smtpProvider: "Unknown",
-      mxFound: "No",
-      mxRecord: null,
-      dmarcPolicy: null,
-      firstName: "Unknown",
-      lastName: "Unknown",
-      message: "Failed to validate email",
-      isValid: false
-    };
-    metricsTracker.recordValidation(startTime, false);
-    return result;
-  }
-}
-
 export function registerRoutes(app: Express): Server {
   // Add CORS headers for API access
   app.use((req, res, next) => {
@@ -187,33 +177,31 @@ export function registerRoutes(app: Express): Server {
     next();
   });
 
-  // Add rate limiting headers
+  // Add rate limiting middleware
   app.use((req, res, next) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
-    let requestsThisHour = 0;
+    const RATE_LIMIT_WINDOW = 3600000; // 1 hour
+    const MAX_REQUESTS = 100;
 
-    // Fix the iteration issue by converting to array first
-    Array.from(rateLimiter.entries()).forEach(([key, timestamp]) => {
-      if (key.startsWith(clientIp) && timestamp > now - RATE_LIMIT_WINDOW) {
-        requestsThisHour++;
-      }
-    });
+    const requestsThisHour = Array.from(rateLimiter.entries())
+      .filter(([key, timestamp]) => 
+        key.startsWith(clientIp) && 
+        timestamp > now - RATE_LIMIT_WINDOW
+      ).length;
 
     if (requestsThisHour >= MAX_REQUESTS) {
-      rateLimiter.set(clientIp, now);
       return res.status(429).json({ message: "Rate limit exceeded" });
     }
 
-    rateLimiter.set(clientIp, now);
+    rateLimiter.set(`${clientIp}_${now}`, now);
     res.header('X-RateLimit-Limit', MAX_REQUESTS.toString());
     res.header('X-RateLimit-Remaining', `${Math.max(0, MAX_REQUESTS - requestsThisHour)}`);
     res.header('X-RateLimit-Reset', `${Math.ceil((now + RATE_LIMIT_WINDOW) / 1000)}`);
     next();
   });
 
-
-  // Add metrics endpoint with proper error handling
+  // API Routes
   app.get("/api/metrics", (_req, res) => {
     try {
       res.json(metricsTracker.getMetrics());
@@ -237,7 +225,6 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      // Check rate limit - this is now handled by the middleware
       const result = await validateEmail(email, clientIp);
       console.log('Validation result:', result);
 
@@ -277,7 +264,7 @@ export function registerRoutes(app: Express): Server {
             status: "error",
             subStatus: "system_error",
             freeEmail: "Unknown",
-            didYouMean: "Unknown",
+            didYouMean: "",
             account: "Unknown",
             domain: "Unknown",
             domainAgeDays: "Unknown",
@@ -287,7 +274,7 @@ export function registerRoutes(app: Express): Server {
             dmarcPolicy: null,
             firstName: "Unknown",
             lastName: "Unknown",
-            message: error.message || "Failed to validate email",
+            message: error instanceof Error ? error.message : "Failed to validate email",
             isValid: false
           }))
       );
