@@ -10,6 +10,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 
+const PREDEFINED_EMAILS = [
+  'ashleybhorton@meta.com',
+  'michael.naumov@teva.co.il',
+  'janerose@google.com',
+  'michael@ringsize.ru',
+  'neptun2000@yandex.ru',
+  'vkroz@amazon.com',
+  'mark.maalouf@tevapharm.com',
+  'smquadrat@gmail.com'
+].join('\n');
+
 const formSchema = z.object({
   emailList: z.string()
     .min(1, "Please enter at least one email address")
@@ -82,11 +93,25 @@ export function CustomEmailTester() {
     setResults([]);
   };
 
+  const loadPredefinedEmails = () => {
+    form.setValue('emailList', PREDEFINED_EMAILS);
+  };
+
   return (
     <Card>
       <CardContent className="pt-6">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <div className="flex justify-end mb-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={loadPredefinedEmails}
+                className="text-sm"
+              >
+                Load Test Emails
+              </Button>
+            </div>
             <FormField
               control={form.control}
               name="emailList"
