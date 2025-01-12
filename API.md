@@ -3,6 +3,14 @@
 ## Base URL
 `https://your-replit-url.replit.dev/api`
 
+## Rate Limiting
+The API implements rate limiting to ensure fair usage:
+- 100 requests per hour per IP address
+- Rate limit headers are included in all responses:
+  - `X-RateLimit-Limit`: Maximum requests per hour (100)
+  - `X-RateLimit-Remaining`: Remaining requests for the current hour
+  - `X-RateLimit-Reset`: Unix timestamp when the rate limit resets
+
 ## Endpoints
 
 ### Validate Single Email
@@ -88,26 +96,39 @@ Returns validation statistics and performance metrics.
   "successfulValidations": 95,
   "failedValidations": 5,
   "averageValidationTime": 250,
-  "hourlyMetrics": [...],
-  "dailyMetrics": [...]
+  "hourlyMetrics": [
+    {
+      "timestamp": 1673520000000,
+      "validations": 50,
+      "successRate": 95.5,
+      "averageTime": 245
+    }
+  ],
+  "dailyMetrics": [
+    {
+      "timestamp": 1673433600000,
+      "validations": 1000,
+      "successRate": 96.2,
+      "averageTime": 248
+    }
+  ]
 }
 ```
 
-## Python Client Example
+## Code Examples
 
-Here's how to use the API with Python requests:
-
+### Python
 ```python
 import requests
 
 def validate_email(email, api_url="https://your-replit-url.replit.dev"):
     """
     Validate a single email address.
-    
+
     Args:
         email (str): Email address to validate
         api_url (str): Base URL of the validation API
-        
+
     Returns:
         dict: Validation result
     """
@@ -121,11 +142,11 @@ def validate_email(email, api_url="https://your-replit-url.replit.dev"):
 def validate_emails(emails, api_url="https://your-replit-url.replit.dev"):
     """
     Validate multiple email addresses (max 100 per request).
-    
+
     Args:
         emails (list): List of email addresses to validate
         api_url (str): Base URL of the validation API
-        
+
     Returns:
         list: List of validation results
     """
@@ -139,10 +160,10 @@ def validate_emails(emails, api_url="https://your-replit-url.replit.dev"):
 def get_metrics(api_url="https://your-replit-url.replit.dev"):
     """
     Get validation statistics and metrics.
-    
+
     Args:
         api_url (str): Base URL of the validation API
-        
+
     Returns:
         dict: Validation metrics
     """
@@ -165,19 +186,119 @@ if __name__ == "__main__":
     print("Validation metrics:", metrics)
 ```
 
+### Node.js
+```javascript
+const axios = require('axios');
+
+async function validateEmail(email, apiUrl = 'https://your-replit-url.replit.dev') {
+  try {
+    const response = await axios.post(`${apiUrl}/api/validate-email`, {
+      email
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(`${error.response.status}: ${error.response.data.message}`);
+    }
+    throw error;
+  }
+}
+
+async function validateEmails(emails, apiUrl = 'https://your-replit-url.replit.dev') {
+  try {
+    const response = await axios.post(`${apiUrl}/api/validate-emails`, {
+      emails
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(`${error.response.status}: ${error.response.data.message}`);
+    }
+    throw error;
+  }
+}
+
+async function getMetrics(apiUrl = 'https://your-replit-url.replit.dev') {
+  try {
+    const response = await axios.get(`${apiUrl}/api/metrics`);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(`${error.response.status}: ${error.response.data.message}`);
+    }
+    throw error;
+  }
+}
+```
+
+### cURL
+```bash
+# Validate single email
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com"}' \
+  https://your-replit-url.replit.dev/api/validate-email
+
+# Validate multiple emails
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"emails":["test1@example.com","test2@example.com"]}' \
+  https://your-replit-url.replit.dev/api/validate-emails
+
+# Get metrics
+curl https://your-replit-url.replit.dev/api/metrics
+```
+
 ## Error Responses
 
-The API uses standard HTTP status codes:
+The API uses standard HTTP status codes and provides detailed error messages:
 
+### Status Codes
 - 200: Success
 - 400: Bad Request (invalid input)
 - 429: Too Many Requests (rate limit exceeded)
 - 500: Internal Server Error
 
-Error responses include a message field explaining the error:
-
+### Error Response Format
 ```json
 {
   "message": "Error description"
 }
 ```
+
+### Common Error Examples
+
+#### Invalid Email Format (400)
+```json
+{
+  "message": "Email is required and must be a string"
+}
+```
+
+#### Rate Limit Exceeded (429)
+```json
+{
+  "message": "Rate limit exceeded. Please try again later."
+}
+```
+
+#### Too Many Emails in Bulk Request (400)
+```json
+{
+  "message": "Maximum 100 emails allowed per request"
+}
+```
+
+#### Server Error (500)
+```json
+{
+  "message": "Internal server error during validation"
+}
+```
+
+## Best Practices
+1. Always handle rate limits by checking response headers
+2. Implement exponential backoff for retries
+3. Keep bulk validation requests under 100 emails
+4. Check for and handle all error responses
+5. Use HTTPS for secure communication

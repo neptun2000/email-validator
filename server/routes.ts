@@ -183,11 +183,12 @@ export function registerRoutes(app: Express): Server {
     const now = Date.now();
     let requestsThisHour = 0;
 
-    for (const [key, timestamp] of rateLimiter.entries()) {
+    // Fix the iteration issue by converting to array first
+    Array.from(rateLimiter.entries()).forEach(([key, timestamp]) => {
       if (key.startsWith(clientIp) && timestamp > now - RATE_LIMIT_WINDOW) {
         requestsThisHour++;
       }
-    }
+    });
 
     if (requestsThisHour >= MAX_REQUESTS) {
         rateLimiter.set(clientIp, now);
