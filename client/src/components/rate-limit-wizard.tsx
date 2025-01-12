@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,13 +17,21 @@ interface RateLimitConfig {
 
 export function RateLimitWizard() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [config, setConfig] = useState<RateLimitConfig | null>(null);
 
-  const { data, isLoading } = useQuery<RateLimitConfig>({
+  const { data: initialConfig, isLoading } = useQuery<{ config: RateLimitConfig }>({
     queryKey: ['/api/rate-limit-config'],
+    queryFn: async () => {
+      const response = await fetch('/api/rate-limit-config');
+      if (!response.ok) {
+        throw new Error('Failed to fetch configuration');
+      }
+      return response.json();
+    },
     onSuccess: (data) => {
-      if (!config) {
-        setConfig(data);
+      if (!config && data.config) {
+        setConfig(data.config);
       }
     }
   });
@@ -39,13 +47,15 @@ export function RateLimitWizard() {
       });
 
       if (!response.ok) {
-        throw new Error(await response.text());
+        const errorText = await response.text();
+        throw new Error(errorText);
       }
 
       return response.json();
     },
     onSuccess: (data) => {
       setConfig(data.config);
+      queryClient.invalidateQueries({ queryKey: ['/api/rate-limit-config'] });
       toast({
         title: "Success",
         description: "Rate limit configuration updated successfully",
