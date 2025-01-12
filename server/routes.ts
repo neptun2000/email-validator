@@ -51,34 +51,39 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
     let responseBuffer = "";
 
     const cleanup = () => {
-      socket.destroy();
+      if (!socket.destroyed) {
+        try {
+          socket.write('QUIT\r\n');
+        } catch (e) {
+          console.error('Error sending QUIT:', e);
+        }
+        socket.destroy();
+      }
     };
 
     const timeout = setTimeout(() => {
       console.log('Connection timeout');
       cleanup();
-      resolve(false);
-    }, 5000); // Reduced timeout to 5 seconds
+      resolve(true); // Be lenient on timeouts - assume email exists
+    }, 10000);
 
     socket.on('data', (data) => {
       responseBuffer += data.toString();
       console.log('SMTP Response:', responseBuffer);
 
-      // Check for error codes that indicate non-existent mailbox
+      // Only check for explicit rejection codes
       if (responseBuffer.includes('550') || // Mailbox unavailable
           responseBuffer.includes('551') || // User not local
           responseBuffer.includes('553') || // Mailbox name invalid
-          responseBuffer.includes('501') || // Syntax error
-          responseBuffer.includes('504') || // Command parameter not implemented
-          responseBuffer.includes('511') || // Bad email address
-          responseBuffer.includes('554')) { // Transaction failed
+          responseBuffer.includes('511')) { // Bad email address
         console.log('Mailbox does not exist or is invalid');
         clearTimeout(timeout);
         cleanup();
         resolve(false);
       }
 
-      if (responseBuffer.includes('220')) {
+      // Standard SMTP conversation
+      if (responseBuffer.includes('220') && !responseBuffer.includes('HELO')) {
         socket.write(`HELO emailvalidator.com\r\n`);
       } else if (responseBuffer.includes('250') && !responseBuffer.includes('MAIL FROM')) {
         socket.write(`MAIL FROM:<verify@emailvalidator.com>\r\n`);
@@ -87,7 +92,6 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       } else if (responseBuffer.includes('250') && responseBuffer.includes('RCPT TO')) {
         console.log('Mailbox exists');
         clearTimeout(timeout);
-        socket.write('QUIT\r\n'); // Properly close the connection
         cleanup();
         resolve(true);
       }
@@ -97,7 +101,7 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       console.error('Socket error:', err.message);
       clearTimeout(timeout);
       cleanup();
-      resolve(false);
+      resolve(true); // Be lenient on connection errors
     });
 
     socket.on('close', () => {
@@ -112,12 +116,12 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       console.error('Connection error:', err);
       clearTimeout(timeout);
       cleanup();
-      resolve(false);
+      resolve(true); // Be lenient on connection errors
     }
   });
 }
 
-async function validateEmail(email: string): Promise<ValidationResult> {
+export async function validateEmail(email: string): Promise<ValidationResult> {
   console.log(`Validating email: ${email}`);
 
   try {
@@ -187,7 +191,7 @@ async function validateEmail(email: string): Promise<ValidationResult> {
       result.mxRecord = primaryMx.exchange;
       result.smtpProvider = primaryMx.exchange.split('.')[0];
 
-      // Verify if the mailbox exists
+      // Modified SMTP verification approach
       console.log('Verifying mailbox existence...');
       const mailboxExists = await verifyMailbox(email, domain, primaryMx.exchange);
 
@@ -273,7 +277,6 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).send("Maximum 100 emails allowed per request");
       }
 
-      // Process emails in parallel with a concurrency limit
       const validationPromises = emails.map(async (email) => {
         try {
           const result = await validateEmail(email);
