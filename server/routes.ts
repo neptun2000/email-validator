@@ -2,12 +2,16 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import dns from "dns";
 import { promisify } from "util";
+import os from 'os'; // Use ES module import instead of require
 import { isDisposableEmail } from "../client/src/lib/validation";
 import { metricsTracker } from "./metrics";
 import { EmailVerifier } from "./email-verifier";
 import { WorkerPool } from './worker-pool';
 
 const resolveMx = promisify(dns.resolveMx);
+
+// Create a worker pool with max workers based on CPU cores
+const workerPool = new WorkerPool(Math.max(2, Math.min(4, os.cpus().length - 1)));
 
 // Rate limiting map to prevent abuse
 const rateLimiter = new Map<string, number>();
@@ -173,9 +177,6 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
     return result;
   }
 }
-
-// Create a worker pool with max workers based on CPU cores
-const workerPool = new WorkerPool(Math.max(2, Math.min(4, require('os').cpus().length - 1)));
 
 export function registerRoutes(app: Express): Server {
   // Add CORS headers for API access
