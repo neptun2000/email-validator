@@ -5,6 +5,7 @@ import { promisify } from "util";
 import { isDisposableEmail } from "../client/src/lib/validation";
 import { metricsTracker } from "./metrics";
 import { EmailVerifier } from "./email-verifier";
+import { WorkerPool } from './worker-pool';
 
 const resolveMx = promisify(dns.resolveMx);
 
@@ -173,6 +174,9 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
   }
 }
 
+// Create a worker pool with max workers based on CPU cores
+const workerPool = new WorkerPool(Math.max(2, Math.min(4, require('os').cpus().length - 1)));
+
 export function registerRoutes(app: Express): Server {
   // Add CORS headers for API access
   app.use((req, res, next) => {
@@ -195,8 +199,8 @@ export function registerRoutes(app: Express): Server {
     });
 
     if (requestsThisHour >= MAX_REQUESTS) {
-        rateLimiter.set(clientIp, now);
-        return res.status(429).json({ message: "Rate limit exceeded" });
+      rateLimiter.set(clientIp, now);
+      return res.status(429).json({ message: "Rate limit exceeded" });
     }
 
     rateLimiter.set(clientIp, now);
@@ -263,14 +267,10 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      // Check rate limit (counts as multiple requests) - handled by middleware
-      const validationPromises = emails.map(async (email) => {
-        try {
-          const result = await validateEmail(email, clientIp);
-          return { ...result, email };
-        } catch (error) {
-          console.error(`Error validating email ${email}:`, error);
-          return {
+      // Process emails in parallel using worker pool
+      const validationPromises = emails.map(email =>
+        workerPool.execute({ email, clientIp })
+          .catch(error => ({
             email,
             status: "error",
             subStatus: "system_error",
@@ -285,16 +285,18 @@ export function registerRoutes(app: Express): Server {
             dmarcPolicy: null,
             firstName: "Unknown",
             lastName: "Unknown",
-            message: "Failed to validate email",
+            message: error.message || "Failed to validate email",
             isValid: false
-          };
-        }
-      });
+          }))
+      );
 
       const results = await Promise.all(validationPromises);
-      console.log(`Completed bulk validation for ${emails.length} emails`);
+      console.log(`Completed parallel bulk validation for ${emails.length} emails`);
 
-      return res.json(results);
+      return res.json(results.map((result, index) => ({
+        ...result,
+        email: emails[index]
+      })));
     } catch (error) {
       console.error("Bulk validation error:", error);
       res.status(500).json({
