@@ -64,18 +64,22 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
     const timeout = setTimeout(() => {
       console.log('Connection timeout');
       cleanup();
-      resolve(true); // Be lenient on timeouts - assume email exists
+      resolve(false); // Timeout means we couldn't verify, assume invalid
     }, 10000);
 
     socket.on('data', (data) => {
       responseBuffer += data.toString();
       console.log('SMTP Response:', responseBuffer);
 
-      // Only check for explicit rejection codes
+      // Check for any error codes that indicate issues
       if (responseBuffer.includes('550') || // Mailbox unavailable
           responseBuffer.includes('551') || // User not local
+          responseBuffer.includes('552') || // Mailbox full
           responseBuffer.includes('553') || // Mailbox name invalid
-          responseBuffer.includes('511')) { // Bad email address
+          responseBuffer.includes('511') || // Bad email address
+          responseBuffer.includes('554') || // Transaction failed
+          responseBuffer.includes('501') || // Syntax error
+          responseBuffer.includes('503')) {  // Bad sequence
         console.log('Mailbox does not exist or is invalid');
         clearTimeout(timeout);
         cleanup();
@@ -90,7 +94,7 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       } else if (responseBuffer.includes('250') && !responseBuffer.includes('RCPT TO')) {
         socket.write(`RCPT TO:<${email}>\r\n`);
       } else if (responseBuffer.includes('250') && responseBuffer.includes('RCPT TO')) {
-        console.log('Mailbox exists');
+        console.log('Mailbox exists and is valid');
         clearTimeout(timeout);
         cleanup();
         resolve(true);
@@ -101,7 +105,7 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       console.error('Socket error:', err.message);
       clearTimeout(timeout);
       cleanup();
-      resolve(true); // Be lenient on connection errors
+      resolve(false); // Connection errors should indicate invalid email
     });
 
     socket.on('close', () => {
@@ -116,7 +120,7 @@ async function verifyMailbox(email: string, domain: string, mxRecord: string): P
       console.error('Connection error:', err);
       clearTimeout(timeout);
       cleanup();
-      resolve(true); // Be lenient on connection errors
+      resolve(false); // Connection errors should indicate invalid email
     }
   });
 }
