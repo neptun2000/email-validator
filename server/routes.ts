@@ -8,6 +8,11 @@ import { EmailVerifier } from "./email-verifier";
 
 const resolveMx = promisify(dns.resolveMx);
 
+// Rate limiting map to prevent abuse
+const rateLimiter = new Map<string, number>();
+const RATE_LIMIT_WINDOW = 3600000; // 1 hour in milliseconds
+const MAX_REQUESTS = 100; // Maximum requests per hour per IP
+
 interface ValidationResult {
   status: string;
   subStatus: string | null;
@@ -117,7 +122,7 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
 
     result.mxFound = verificationResult.mxRecord ? "Yes" : "No";
     result.mxRecord = verificationResult.mxRecord || null;
-    result.smtpProvider = verificationResult.mxRecord ? 
+    result.smtpProvider = verificationResult.mxRecord ?
       verificationResult.mxRecord.split('.')[0] : "Unknown";
 
     if (!verificationResult.valid) {
@@ -165,9 +170,47 @@ export async function validateEmail(email: string, clientIp: string): Promise<Va
 }
 
 export function registerRoutes(app: Express): Server {
-  // Add metrics endpoint
+  // Add CORS headers for API access
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    next();
+  });
+
+  // Add rate limiting headers
+  app.use((req, res, next) => {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    let requestsThisHour = 0;
+
+    for (const [key, timestamp] of rateLimiter.entries()) {
+      if (key.startsWith(clientIp) && timestamp > now - RATE_LIMIT_WINDOW) {
+        requestsThisHour++;
+      }
+    }
+
+    if (requestsThisHour >= MAX_REQUESTS) {
+        rateLimiter.set(clientIp, now);
+        return res.status(429).json({ message: "Rate limit exceeded" });
+    }
+
+    rateLimiter.set(clientIp, now);
+    res.header('X-RateLimit-Limit', MAX_REQUESTS.toString());
+    res.header('X-RateLimit-Remaining', `${Math.max(0, MAX_REQUESTS - requestsThisHour)}`);
+    res.header('X-RateLimit-Reset', `${Math.ceil((now + RATE_LIMIT_WINDOW) / 1000)}`);
+    next();
+  });
+
+
+  // Add metrics endpoint with proper error handling
   app.get("/api/metrics", (_req, res) => {
-    res.json(metricsTracker.getMetrics());
+    try {
+      res.json(metricsTracker.getMetrics());
+    } catch (error) {
+      res.status(500).json({
+        message: "Error retrieving metrics"
+      });
+    }
   });
 
   app.post("/api/validate-email", async (req, res) => {
@@ -178,17 +221,21 @@ export function registerRoutes(app: Express): Server {
       const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
 
       if (!email || typeof email !== "string") {
-        console.log('Invalid request: missing or invalid email');
-        return res.status(400).send("Email is required");
+        return res.status(400).json({
+          message: "Email is required and must be a string"
+        });
       }
 
+      // Check rate limit - this is now handled by the middleware
       const result = await validateEmail(email, clientIp);
       console.log('Validation result:', result);
 
       return res.json(result);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Email validation error:", error);
-      res.status(500).send("Internal server error during validation");
+      res.status(500).json({
+        message: "Internal server error during validation"
+      });
     }
   });
 
@@ -200,15 +247,18 @@ export function registerRoutes(app: Express): Server {
       const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
 
       if (!Array.isArray(emails)) {
-        console.log('Invalid request: emails must be an array');
-        return res.status(400).send("Emails must be provided as an array");
+        return res.status(400).json({
+          message: "Emails must be provided as an array"
+        });
       }
 
       if (emails.length > 100) {
-        console.log('Invalid request: too many emails');
-        return res.status(400).send("Maximum 100 emails allowed per request");
+        return res.status(400).json({
+          message: "Maximum 100 emails allowed per request"
+        });
       }
 
+      // Check rate limit (counts as multiple requests) - handled by middleware
       const validationPromises = emails.map(async (email) => {
         try {
           const result = await validateEmail(email, clientIp);
@@ -241,8 +291,17 @@ export function registerRoutes(app: Express): Server {
       return res.json(results);
     } catch (error) {
       console.error("Bulk validation error:", error);
-      res.status(500).send("Internal server error during bulk validation");
+      res.status(500).json({
+        message: "Internal server error during bulk validation"
+      });
     }
+  });
+
+  // Options for CORS preflight requests
+  app.options("/api/*", (req, res) => {
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    res.status(204).send();
   });
 
   const httpServer = createServer(app);
