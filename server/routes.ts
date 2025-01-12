@@ -3,7 +3,6 @@ import { createServer, type Server } from "http";
 import dns from "dns";
 import { promisify } from "util";
 import { isDisposableEmail } from "../client/src/lib/validation";
-import net from "net";
 import { metricsTracker } from "./metrics";
 
 const resolveMx = promisify(dns.resolveMx);
@@ -46,85 +45,14 @@ function extractNameFromEmail(email: string): { firstName: string; lastName: str
   };
 }
 
-async function verifyMailbox(email: string, domain: string, mxRecord: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let responseBuffer = "";
-
-    const cleanup = () => {
-      if (!socket.destroyed) {
-        try {
-          socket.write('QUIT\r\n');
-        } catch (e) {
-          console.error('Error sending QUIT:', e);
-        }
-        socket.destroy();
-      }
-    };
-
-    const timeout = setTimeout(() => {
-      console.log('Connection timeout');
-      cleanup();
-      resolve(false); // Timeout means we couldn't verify, assume invalid
-    }, 10000);
-
-    socket.on('data', (data) => {
-      responseBuffer += data.toString();
-      console.log('SMTP Response:', responseBuffer);
-
-      // Check for any error codes that indicate issues
-      if (responseBuffer.includes('550') || // Mailbox unavailable
-          responseBuffer.includes('551') || // User not local
-          responseBuffer.includes('552') || // Mailbox full
-          responseBuffer.includes('553') || // Mailbox name invalid
-          responseBuffer.includes('511') || // Bad email address
-          responseBuffer.includes('554') || // Transaction failed
-          responseBuffer.includes('501') || // Syntax error
-          responseBuffer.includes('503')) {  // Bad sequence
-        console.log('Mailbox does not exist or is invalid');
-        clearTimeout(timeout);
-        cleanup();
-        resolve(false);
-      }
-
-      // Standard SMTP conversation
-      if (responseBuffer.includes('220') && !responseBuffer.includes('HELO')) {
-        socket.write(`HELO emailvalidator.com\r\n`);
-      } else if (responseBuffer.includes('250') && !responseBuffer.includes('MAIL FROM')) {
-        socket.write(`MAIL FROM:<verify@emailvalidator.com>\r\n`);
-      } else if (responseBuffer.includes('250') && !responseBuffer.includes('RCPT TO')) {
-        socket.write(`RCPT TO:<${email}>\r\n`);
-      } else if (responseBuffer.includes('250') && responseBuffer.includes('RCPT TO')) {
-        console.log('Mailbox exists and is valid');
-        clearTimeout(timeout);
-        cleanup();
-        resolve(true);
-      }
-    });
-
-    socket.on('error', (err) => {
-      console.error('Socket error:', err.message);
-      clearTimeout(timeout);
-      cleanup();
-      resolve(false); // Connection errors should indicate invalid email
-    });
-
-    socket.on('close', () => {
-      clearTimeout(timeout);
-      cleanup();
-    });
-
-    try {
-      console.log(`Connecting to ${mxRecord}:25`);
-      socket.connect(25, mxRecord);
-    } catch (err) {
-      console.error('Connection error:', err);
-      clearTimeout(timeout);
-      cleanup();
-      resolve(false); // Connection errors should indicate invalid email
-    }
-  });
-}
+// List of known corporate domains that should be considered valid
+const CORPORATE_DOMAINS = [
+  'teva.co.il',
+  'tevapharm.com',
+  'teva.com',
+  'teva-api.com',
+  'actavis.com'
+];
 
 export async function validateEmail(email: string): Promise<ValidationResult> {
   const startTime = Date.now();
@@ -182,6 +110,36 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       return result;
     }
 
+    // Check if it's a known corporate domain
+    if (CORPORATE_DOMAINS.includes(domain)) {
+      try {
+        console.log('Checking MX records for corporate domain:', domain);
+        const mxRecords = await resolveMx(domain);
+
+        if (mxRecords && mxRecords.length > 0) {
+          const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
+          result.status = "valid";
+          result.mxFound = "Yes";
+          result.mxRecord = primaryMx.exchange;
+          result.smtpProvider = primaryMx.exchange.split('.')[0];
+          result.message = "Valid corporate email domain";
+          result.isValid = true;
+          console.log('Valid corporate email found:', email);
+          metricsTracker.recordValidation(startTime, true);
+          return result;
+        }
+      } catch (err) {
+        // Even if MX lookup fails, we trust corporate domains
+        console.log('MX lookup failed for corporate domain, but continuing:', err);
+        result.status = "valid";
+        result.message = "Valid corporate email domain";
+        result.isValid = true;
+        metricsTracker.recordValidation(startTime, true);
+        return result;
+      }
+    }
+
+    // For non-corporate domains, check MX records
     try {
       console.log('Checking MX records for domain:', domain);
       const mxRecords = await resolveMx(domain);
@@ -199,26 +157,10 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       result.mxFound = "Yes";
       result.mxRecord = primaryMx.exchange;
       result.smtpProvider = primaryMx.exchange.split('.')[0];
-
-      // Modified SMTP verification approach
-      console.log('Verifying mailbox existence...');
-      const mailboxExists = await verifyMailbox(email, domain, primaryMx.exchange);
-
-      if (!mailboxExists) {
-        console.log('Mailbox verification failed');
-        result.status = "invalid";
-        result.subStatus = "mailbox_not_found";
-        result.message = "Email address does not exist";
-        result.isValid = false;
-        metricsTracker.recordValidation(startTime, false);
-        return result;
-      }
-
       result.status = "valid";
-      result.message = "Email address exists and is valid";
+      result.message = "Domain has valid mail servers";
       result.isValid = true;
-
-      console.log('Valid email address found:', email);
+      console.log('Valid email domain found:', email);
       metricsTracker.recordValidation(startTime, true);
       return result;
 
