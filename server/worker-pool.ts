@@ -34,8 +34,8 @@ export class WorkerPool {
     const { task, resolve, reject } = this.queue.shift()!;
     this.activeWorkers++;
 
-    // Use .js extension instead of .ts
-    const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
+    // Use .ts extension for TypeScript files
+    const worker = new Worker(path.join(__dirname, 'email-validation.worker.ts'), {
       workerData: task
     });
 

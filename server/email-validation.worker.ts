@@ -1,10 +1,10 @@
 import { parentPort, workerData } from 'worker_threads';
-import { validateEmail } from './routes';
+import { validateEmailForWorker } from './email-validation-utils';
 
 async function validateEmailInWorker() {
   const { email, clientIp } = workerData;
   try {
-    const result = await validateEmail(email, clientIp);
+    const result = await validateEmailForWorker(email, clientIp);
     parentPort?.postMessage({ success: true, result });
   } catch (error) {
     parentPort?.postMessage({
