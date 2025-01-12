@@ -200,6 +200,7 @@ export function BulkEmailValidator() {
                     <TableCell>{result.email}</TableCell>
                     <TableCell className={result.isValid ? "text-green-600" : "text-red-600"}>
                       {result.status.toUpperCase()}
+                      {result.subStatus && ` (${result.subStatus})`}
                     </TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>{result.domain}</TableCell>
