@@ -4,6 +4,7 @@ import dns from "dns";
 import { promisify } from "util";
 import { isDisposableEmail } from "../client/src/lib/validation";
 import { metricsTracker } from "./metrics";
+import { EmailVerifier } from "./email-verifier";
 
 const resolveMx = promisify(dns.resolveMx);
 
@@ -45,7 +46,6 @@ function extractNameFromEmail(email: string): { firstName: string; lastName: str
   };
 }
 
-// List of known corporate domains that should be considered valid
 const CORPORATE_DOMAINS = [
   'teva.co.il',
   'tevapharm.com',
@@ -54,14 +54,15 @@ const CORPORATE_DOMAINS = [
   'actavis.com'
 ];
 
-export async function validateEmail(email: string): Promise<ValidationResult> {
+export async function validateEmail(email: string, clientIp: string): Promise<ValidationResult> {
   const startTime = Date.now();
-  console.log(`Validating email: ${email}`);
+  console.log(`Starting validation for email: ${email}`);
 
   try {
     const [account, domain] = email.split("@");
 
     if (!domain || !account) {
+      console.log('Invalid email format:', email);
       const result = {
         status: "invalid",
         subStatus: "format_error",
@@ -110,69 +111,36 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
       return result;
     }
 
-    // Check if it's a known corporate domain
-    console.log('Checking if domain is corporate:', domain, 'Is corporate?', CORPORATE_DOMAINS.includes(domain));
-    if (CORPORATE_DOMAINS.includes(domain)) {
-      try {
-        console.log('Checking MX records for corporate domain:', domain);
-        const mxRecords = await resolveMx(domain);
+    // Verify email using our EmailVerifier
+    const verificationResult = await EmailVerifier.verify(email, clientIp);
+    console.log('Verification result:', verificationResult);
 
-        if (mxRecords && mxRecords.length > 0) {
-          const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
-          console.log('Found MX records for corporate domain:', mxRecords);
-          result.status = "valid";
-          result.mxFound = "Yes";
-          result.mxRecord = primaryMx.exchange;
-          result.smtpProvider = primaryMx.exchange.split('.')[0];
-          result.message = "Valid corporate email domain";
-          result.isValid = true;
-          metricsTracker.recordValidation(startTime, true);
-          return result;
-        }
-      } catch (err) {
-        // Even if MX lookup fails, we trust corporate domains
-        console.log('MX lookup failed for corporate domain, but continuing:', err);
-        result.status = "valid";
-        result.message = "Valid corporate email domain";
-        result.isValid = true;
-        metricsTracker.recordValidation(startTime, true);
-        return result;
-      }
-    }
+    result.mxFound = verificationResult.mxRecord ? "Yes" : "No";
+    result.mxRecord = verificationResult.mxRecord || null;
+    result.smtpProvider = verificationResult.mxRecord ? 
+      verificationResult.mxRecord.split('.')[0] : "Unknown";
 
-    // For non-corporate domains, check MX records
-    try {
-      console.log('Checking MX records for domain:', domain);
-      const mxRecords = await resolveMx(domain);
-
-      if (!mxRecords || mxRecords.length === 0) {
-        console.log('No MX records found for domain:', domain);
-        result.status = "invalid";
-        result.subStatus = "no_mx_record";
-        result.message = "Domain does not have valid mail servers";
-        metricsTracker.recordValidation(startTime, false);
-        return result;
-      }
-
-      const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
-      result.mxFound = "Yes";
-      result.mxRecord = primaryMx.exchange;
-      result.smtpProvider = primaryMx.exchange.split('.')[0];
-      result.status = "valid";
-      result.message = "Domain has valid mail servers";
-      result.isValid = true;
-      console.log('Valid email domain found:', email);
-      metricsTracker.recordValidation(startTime, true);
-      return result;
-
-    } catch (dnsError) {
-      console.error('DNS error:', dnsError);
+    if (!verificationResult.valid) {
       result.status = "invalid";
-      result.subStatus = "dns_error";
-      result.message = "Domain appears to be invalid";
+      result.subStatus = "verification_failed";
+      result.message = verificationResult.reason || "Email verification failed";
       metricsTracker.recordValidation(startTime, false);
       return result;
     }
+
+    // Additional check for corporate domains
+    const isCorporateDomain = CORPORATE_DOMAINS.includes(domain);
+    if (isCorporateDomain) {
+      result.message = "Valid corporate email address";
+    } else {
+      result.message = "Valid email address";
+    }
+
+    result.status = "valid";
+    result.isValid = true;
+    metricsTracker.recordValidation(startTime, true);
+    return result;
+
   } catch (error) {
     console.error("Email validation error:", error);
     const result = {
@@ -207,13 +175,14 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const { email } = req.body;
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
 
       if (!email || typeof email !== "string") {
         console.log('Invalid request: missing or invalid email');
         return res.status(400).send("Email is required");
       }
 
-      const result = await validateEmail(email);
+      const result = await validateEmail(email, clientIp);
       console.log('Validation result:', result);
 
       return res.json(result);
@@ -228,6 +197,7 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const { emails } = req.body;
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
 
       if (!Array.isArray(emails)) {
         console.log('Invalid request: emails must be an array');
@@ -241,7 +211,7 @@ export function registerRoutes(app: Express): Server {
 
       const validationPromises = emails.map(async (email) => {
         try {
-          const result = await validateEmail(email);
+          const result = await validateEmail(email, clientIp);
           return { ...result, email };
         } catch (error) {
           console.error(`Error validating email ${email}:`, error);
