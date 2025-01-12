@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'worker_threads';
-import { validateEmailForWorker } from './email-validation-utils';
+import { validateEmailForWorker } from './email-validation-utils.js';
 
 async function validateEmailInWorker() {
   const { email, clientIp } = workerData;

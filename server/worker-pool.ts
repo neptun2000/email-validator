@@ -34,14 +34,7 @@ export class WorkerPool {
     const { task, resolve, reject } = this.queue.shift()!;
     this.activeWorkers++;
 
-    // Use tsx to run TypeScript files
-    const worker = new Worker(`
-      import { createRequire } from 'module';
-      const require = createRequire(import.meta.url);
-      const { tsx } = require('tsx');
-      tsx.runFile('${path.join(__dirname, 'email-validation.worker.ts')}');
-    `, {
-      eval: true,
+    const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
       workerData: task
     });
 
