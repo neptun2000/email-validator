@@ -111,6 +111,7 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
     }
 
     // Check if it's a known corporate domain
+    console.log('Checking if domain is corporate:', domain, 'Is corporate?', CORPORATE_DOMAINS.includes(domain));
     if (CORPORATE_DOMAINS.includes(domain)) {
       try {
         console.log('Checking MX records for corporate domain:', domain);
@@ -118,13 +119,13 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
 
         if (mxRecords && mxRecords.length > 0) {
           const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
+          console.log('Found MX records for corporate domain:', mxRecords);
           result.status = "valid";
           result.mxFound = "Yes";
           result.mxRecord = primaryMx.exchange;
           result.smtpProvider = primaryMx.exchange.split('.')[0];
           result.message = "Valid corporate email domain";
           result.isValid = true;
-          console.log('Valid corporate email found:', email);
           metricsTracker.recordValidation(startTime, true);
           return result;
         }
