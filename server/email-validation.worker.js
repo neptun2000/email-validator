@@ -1,5 +1,5 @@
-const { parentPort, workerData } = require('worker_threads');
-const { validateEmailForWorker } = require('./email-validation-utils.js');
+import { parentPort, workerData } from 'worker_threads';
+import { validateEmailForWorker } from './email-validation-utils.js';
 
 async function processEmail() {
   try {

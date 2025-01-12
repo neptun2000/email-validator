@@ -1,8 +1,8 @@
-const dns = require('dns');
-const { promisify } = require('util');
+import dns from 'dns';
+import { promisify } from 'util';
 const resolveMx = promisify(dns.resolveMx);
 
-async function validateEmailForWorker(email, clientIp) {
+export async function validateEmailForWorker(email, clientIp) {
   try {
     const [account, domain] = email.split("@");
 
@@ -88,5 +88,3 @@ async function validateEmailForWorker(email, clientIp) {
     };
   }
 }
-
-module.exports = { validateEmailForWorker };
