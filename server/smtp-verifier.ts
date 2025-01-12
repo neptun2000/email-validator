@@ -53,7 +53,7 @@ interface VerificationResult {
 
 export class SmtpVerifier extends EventEmitter {
   private static readonly TIMEOUT = 10000; // 10 seconds
-  private static readonly HELO_DOMAIN = 'verify.local';
+  private static readonly HELO_DOMAIN = 'replit.com'; // Using replit.com as it's a valid domain
   private readonly logs: StageLog[] = [];
   private startTime: number;
 
@@ -77,7 +77,7 @@ export class SmtpVerifier extends EventEmitter {
 
     this.logs.push(log);
     this.emit('log', log);
-    
+
     console.log(`[SMTP Verification] ${stage}:`, {
       success,
       duration: log.duration,
@@ -133,7 +133,7 @@ export class SmtpVerifier extends EventEmitter {
 
       // Sort by priority
       const mxRecords = records.sort((a, b) => a.priority - b.priority);
-      
+
       this.logStage(VerificationStage.DNS_LOOKUP, true, {
         response: `Found ${mxRecords.length} MX records, primary: ${mxRecords[0].exchange}`
       });
@@ -186,7 +186,7 @@ export class SmtpVerifier extends EventEmitter {
 
       socket.on('data', (data) => {
         response = data.toString();
-        
+
         try {
           switch (stage) {
             case 0: // Greeting
@@ -217,9 +217,9 @@ export class SmtpVerifier extends EventEmitter {
                 this.logStage(VerificationStage.HELO, true, {
                   response
                 });
-                socket.write(`MAIL FROM:<verify@${SmtpVerifier.HELO_DOMAIN}>\r\n`);
+                socket.write(`MAIL FROM:<verifier@${SmtpVerifier.HELO_DOMAIN}>\r\n`);
                 this.logStage(VerificationStage.MAIL_FROM, true, {
-                  request: `MAIL FROM:<verify@${SmtpVerifier.HELO_DOMAIN}>`
+                  request: `MAIL FROM:<verifier@${SmtpVerifier.HELO_DOMAIN}>`
                 });
                 stage++;
               } else {
@@ -299,7 +299,7 @@ export class SmtpVerifier extends EventEmitter {
                 success: !isCatchAll
               });
               cleanup();
-              
+
               if (isCatchAll) {
                 resolve({
                   valid: false,
