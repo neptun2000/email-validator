@@ -14,22 +14,25 @@ export default function Home() {
           </p>
         </div>
 
-        <ValidationMetrics />
+        <Tabs defaultValue="validation" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="validation">Validation</TabsTrigger>
+            <TabsTrigger value="bulk">Bulk Check</TabsTrigger>
+            <TabsTrigger value="metrics">Statistics</TabsTrigger>
+          </TabsList>
 
-        <div className="mt-8">
-          <Tabs defaultValue="single">
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="single">Single Email</TabsTrigger>
-              <TabsTrigger value="bulk">Bulk Validation</TabsTrigger>
-            </TabsList>
-            <TabsContent value="single">
-              <EmailValidator />
-            </TabsContent>
-            <TabsContent value="bulk">
-              <BulkEmailValidator />
-            </TabsContent>
-          </Tabs>
-        </div>
+          <TabsContent value="validation">
+            <EmailValidator />
+          </TabsContent>
+
+          <TabsContent value="bulk">
+            <BulkEmailValidator />
+          </TabsContent>
+
+          <TabsContent value="metrics">
+            <ValidationMetrics />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
