@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import dns from "dns";
 import { promisify } from "util";
 import { isDisposableEmail } from "../client/src/lib/validation";
+import net from "net";
 
 const resolveMx = promisify(dns.resolveMx);
 
@@ -26,7 +27,7 @@ interface ValidationResult {
 function extractNameFromEmail(email: string): { firstName: string; lastName: string } {
   const [account] = email.split('@');
   const nameParts = account
-    .replace(/[._]/g, ' ') // Replace dots and underscores with spaces
+    .replace(/[._]/g, ' ')
     .split(' ')
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
@@ -44,11 +45,82 @@ function extractNameFromEmail(email: string): { firstName: string; lastName: str
   };
 }
 
+async function verifyMailbox(email: string, domain: string, mxRecord: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let responseBuffer = "";
+
+    const cleanup = () => {
+      socket.destroy();
+    };
+
+    const timeout = setTimeout(() => {
+      console.log('Connection timeout');
+      cleanup();
+      resolve(false);
+    }, 5000); // Reduced timeout to 5 seconds
+
+    socket.on('data', (data) => {
+      responseBuffer += data.toString();
+      console.log('SMTP Response:', responseBuffer);
+
+      // Check for error codes that indicate non-existent mailbox
+      if (responseBuffer.includes('550') || // Mailbox unavailable
+          responseBuffer.includes('551') || // User not local
+          responseBuffer.includes('553') || // Mailbox name invalid
+          responseBuffer.includes('501') || // Syntax error
+          responseBuffer.includes('504') || // Command parameter not implemented
+          responseBuffer.includes('511') || // Bad email address
+          responseBuffer.includes('554')) { // Transaction failed
+        console.log('Mailbox does not exist or is invalid');
+        clearTimeout(timeout);
+        cleanup();
+        resolve(false);
+      }
+
+      if (responseBuffer.includes('220')) {
+        socket.write(`HELO emailvalidator.com\r\n`);
+      } else if (responseBuffer.includes('250') && !responseBuffer.includes('MAIL FROM')) {
+        socket.write(`MAIL FROM:<verify@emailvalidator.com>\r\n`);
+      } else if (responseBuffer.includes('250') && !responseBuffer.includes('RCPT TO')) {
+        socket.write(`RCPT TO:<${email}>\r\n`);
+      } else if (responseBuffer.includes('250') && responseBuffer.includes('RCPT TO')) {
+        console.log('Mailbox exists');
+        clearTimeout(timeout);
+        socket.write('QUIT\r\n'); // Properly close the connection
+        cleanup();
+        resolve(true);
+      }
+    });
+
+    socket.on('error', (err) => {
+      console.error('Socket error:', err.message);
+      clearTimeout(timeout);
+      cleanup();
+      resolve(false);
+    });
+
+    socket.on('close', () => {
+      clearTimeout(timeout);
+      cleanup();
+    });
+
+    try {
+      console.log(`Connecting to ${mxRecord}:25`);
+      socket.connect(25, mxRecord);
+    } catch (err) {
+      console.error('Connection error:', err);
+      clearTimeout(timeout);
+      cleanup();
+      resolve(false);
+    }
+  });
+}
+
 async function validateEmail(email: string): Promise<ValidationResult> {
   console.log(`Validating email: ${email}`);
 
   try {
-    // Extract domain and account from email
     const [account, domain] = email.split("@");
 
     if (!domain || !account) {
@@ -71,14 +143,12 @@ async function validateEmail(email: string): Promise<ValidationResult> {
       };
     }
 
-    // Extract name information
     const { firstName, lastName } = extractNameFromEmail(email);
 
-    // Initialize result object
     const result: ValidationResult = {
       status: "checking",
       subStatus: null,
-      freeEmail: "No", // Assuming corporate email by default
+      freeEmail: "No",
       didYouMean: "Unknown",
       account,
       domain,
@@ -92,7 +162,6 @@ async function validateEmail(email: string): Promise<ValidationResult> {
       isValid: false
     };
 
-    // Check if it's a disposable email
     if (isDisposableEmail(domain)) {
       console.log('Disposable email detected:', domain);
       result.status = "invalid";
@@ -101,7 +170,6 @@ async function validateEmail(email: string): Promise<ValidationResult> {
       return result;
     }
 
-    // Verify domain has MX records
     try {
       console.log('Checking MX records for domain:', domain);
       const mxRecords = await resolveMx(domain);
@@ -114,16 +182,29 @@ async function validateEmail(email: string): Promise<ValidationResult> {
         return result;
       }
 
-      // Sort MX records by priority and get the primary one
       const primaryMx = mxRecords.sort((a, b) => a.priority - b.priority)[0];
       result.mxFound = "Yes";
       result.mxRecord = primaryMx.exchange;
       result.smtpProvider = primaryMx.exchange.split('.')[0];
+
+      // Verify if the mailbox exists
+      console.log('Verifying mailbox existence...');
+      const mailboxExists = await verifyMailbox(email, domain, primaryMx.exchange);
+
+      if (!mailboxExists) {
+        console.log('Mailbox verification failed');
+        result.status = "invalid";
+        result.subStatus = "mailbox_not_found";
+        result.message = "Email address does not exist";
+        result.isValid = false;
+        return result;
+      }
+
       result.status = "valid";
-      result.message = "Email domain appears to be valid";
+      result.message = "Email address exists and is valid";
       result.isValid = true;
 
-      console.log('Valid MX records found for domain:', domain);
+      console.log('Valid email address found:', email);
       return result;
 
     } catch (dnsError) {
