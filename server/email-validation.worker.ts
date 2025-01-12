@@ -5,18 +5,26 @@ async function validateEmailInWorker() {
   const { email, clientIp } = workerData;
   try {
     const result = await validateEmailForWorker(email, clientIp);
-    parentPort?.postMessage({ success: true, result });
+    if (parentPort) {
+      parentPort.postMessage({ success: true, result });
+    }
   } catch (error) {
-    parentPort?.postMessage({
+    if (parentPort) {
+      parentPort.postMessage({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+}
+
+// Execute worker
+validateEmailInWorker().catch(error => {
+  console.error('Worker error:', error);
+  if (parentPort) {
+    parentPort.postMessage({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
-}
-
-validateEmailInWorker().catch(error => {
-  parentPort?.postMessage({
-    success: false,
-    error: error instanceof Error ? error.message : 'Unknown error'
-  });
 });

@@ -34,32 +34,41 @@ export class WorkerPool {
     const { task, resolve, reject } = this.queue.shift()!;
     this.activeWorkers++;
 
-    const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
-      workerData: task
-    });
+    // Create worker with better error handling
+    try {
+      const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
+        workerData: task
+      });
 
-    worker.on('message', (result) => {
-      if (result.success) {
-        resolve(result.result);
-      } else {
-        reject(new Error(result.error));
-      }
-      this.cleanupWorker(worker);
-    });
+      worker.on('message', (result) => {
+        if (result.success) {
+          resolve(result.result);
+        } else {
+          reject(new Error(result.error));
+        }
+        this.cleanupWorker(worker);
+      });
 
-    worker.on('error', (error) => {
+      worker.on('error', (error) => {
+        console.error('Worker error:', error);
+        reject(error);
+        this.cleanupWorker(worker);
+      });
+
+      worker.on('exit', (code) => {
+        if (code !== 0) {
+          reject(new Error(`Worker stopped with exit code ${code}`));
+        }
+        this.cleanupWorker(worker);
+      });
+
+      this.workers.push(worker);
+    } catch (error) {
+      console.error('Failed to create worker:', error);
       reject(error);
-      this.cleanupWorker(worker);
-    });
-
-    worker.on('exit', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Worker stopped with exit code ${code}`));
-      }
-      this.cleanupWorker(worker);
-    });
-
-    this.workers.push(worker);
+      this.activeWorkers--;
+      this.processQueue();
+    }
   }
 
   private cleanupWorker(worker: Worker) {
