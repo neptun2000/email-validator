@@ -13,9 +13,9 @@ import { rateLimitConfig } from './rate-limit-config';
 const workerPool = new WorkerPool(Math.max(2, Math.min(4, os.cpus().length - 1)));
 
 // Rate limiting map to prevent abuse
-const rateLimiter = new Map<string, number>();
+const rateLimiter = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 3600000; // 1 hour in milliseconds
-const MAX_REQUESTS = 100; // Maximum requests per hour per IP
+const MAX_REQUESTS = 1000; // Increased maximum requests per hour per IP
 
 interface ValidationResult {
   status: string;
@@ -181,22 +181,27 @@ export function registerRoutes(app: Express): Server {
   app.use((req, res, next) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
-    const RATE_LIMIT_WINDOW = 3600000; // 1 hour
-    const MAX_REQUESTS = 100;
 
-    const requestsThisHour = Array.from(rateLimiter.entries())
-      .filter(([key, timestamp]) => 
-        key.startsWith(clientIp) && 
-        timestamp > now - RATE_LIMIT_WINDOW
-      ).length;
+    // Get or initialize the timestamps array for this IP
+    let timestamps = rateLimiter.get(clientIp) || [];
 
-    if (requestsThisHour >= MAX_REQUESTS) {
-      return res.status(429).json({ message: "Rate limit exceeded" });
+    // Filter out old timestamps
+    timestamps = timestamps.filter(timestamp => timestamp > now - RATE_LIMIT_WINDOW);
+
+    if (timestamps.length >= MAX_REQUESTS) {
+      return res.status(429).json({ 
+        message: "Rate limit exceeded. Please try again later.",
+        resetTime: Math.ceil((timestamps[0] + RATE_LIMIT_WINDOW) / 1000)
+      });
     }
 
-    rateLimiter.set(`${clientIp}_${now}`, now);
+    // Add new timestamp and update the map
+    timestamps.push(now);
+    rateLimiter.set(clientIp, timestamps);
+
+    // Set rate limit headers
     res.header('X-RateLimit-Limit', MAX_REQUESTS.toString());
-    res.header('X-RateLimit-Remaining', `${Math.max(0, MAX_REQUESTS - requestsThisHour)}`);
+    res.header('X-RateLimit-Remaining', `${Math.max(0, MAX_REQUESTS - timestamps.length)}`);
     res.header('X-RateLimit-Reset', `${Math.ceil((now + RATE_LIMIT_WINDOW) / 1000)}`);
     next();
   });

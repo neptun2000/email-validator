@@ -44,9 +44,9 @@ interface VerificationResult {
 }
 
 // Rate limiting map to prevent abuse
-const rateLimiter = new Map<string, number>();
+const rateLimiter = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 3600000; // 1 hour in milliseconds
-const MAX_ATTEMPTS = 100; // Maximum attempts per hour per IP
+const MAX_ATTEMPTS = 1000; // Increased maximum attempts per hour per IP
 
 export class EmailVerifier {
   static isCorporateDomain(domain: string): boolean {
@@ -59,22 +59,20 @@ export class EmailVerifier {
     const now = Date.now();
     const windowStart = now - RATE_LIMIT_WINDOW;
 
-    // Clean up old entries
-    for (const [key, timestamp] of rateLimiter) {
-      if (timestamp < windowStart) {
-        rateLimiter.delete(key);
-      }
-    }
+    // Get or initialize the timestamps array for this IP
+    let timestamps = rateLimiter.get(ip) || [];
 
-    const attempts = Array.from(rateLimiter.entries())
-      .filter(([key, timestamp]) => key.startsWith(ip) && timestamp > windowStart)
-      .length;
+    // Filter out old timestamps
+    timestamps = timestamps.filter(timestamp => timestamp > windowStart);
 
-    if (attempts >= MAX_ATTEMPTS) {
+    if (timestamps.length >= MAX_ATTEMPTS) {
       return false;
     }
 
-    rateLimiter.set(`${ip}_${now}`, now);
+    // Add new timestamp and update the map
+    timestamps.push(now);
+    rateLimiter.set(ip, timestamps);
+
     return true;
   }
 
