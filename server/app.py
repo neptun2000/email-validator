@@ -12,6 +12,11 @@ from pathlib import Path
 app = FastAPI(title="Email Validation Platform")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+# Mount static files
+static_path = Path(__file__).parent / "static"
+static_path.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -191,4 +196,4 @@ async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationRes
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
