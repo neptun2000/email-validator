@@ -61,73 +61,6 @@ async function validateEmailsPython(emails: string[]): Promise<any> {
   });
 }
 
-async function processBatchEmails(jobId: number, emails: string[]) {
-  const batchSize = 100;
-  let processedCount = 0;
-
-  try {
-    await db.update(validationJobs)
-      .set({
-        status: "processing",
-        updatedAt: new Date(),
-      })
-      .where(eq(validationJobs.id, jobId));
-
-    for (let i = 0; i < emails.length; i += batchSize) {
-      const batch = emails.slice(i, i + batchSize);
-      console.log(`Processing batch ${i / batchSize + 1} of ${Math.ceil(emails.length / batchSize)}`);
-
-      try {
-        const results = await validateEmailsPython(batch);
-
-        await db.insert(validationResults).values(
-          results.map((result: any) => ({
-            jobId,
-            email: result.email,
-            isValid: result.isValid,
-            status: result.status,
-            message: result.message,
-            domain: result.domain,
-            mxRecord: result.mxRecord,
-            createdAt: new Date()
-          }))
-        );
-
-        processedCount += batch.length;
-
-        await db.update(validationJobs)
-          .set({
-            processedEmails: processedCount,
-            updatedAt: new Date(),
-          })
-          .where(eq(validationJobs.id, jobId));
-      } catch (error) {
-        console.error("Batch validation error:", error);
-        throw error;
-      }
-    }
-
-    await db.update(validationJobs)
-      .set({
-        status: "completed",
-        updatedAt: new Date(),
-      })
-      .where(eq(validationJobs.id, jobId));
-
-  } catch (error) {
-    console.error("Batch processing error:", error);
-    await db.update(validationJobs)
-      .set({
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error",
-        updatedAt: new Date(),
-      })
-      .where(eq(validationJobs.id, jobId));
-
-    throw error;
-  }
-}
-
 export function registerRoutes(app: Express): Server {
   // CORS middleware
   app.use((req, res, next) => {
@@ -169,26 +102,6 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      if (emails.length > 100) {
-        const [job] = await db.insert(validationJobs)
-          .values({
-            totalEmails: emails.length,
-            processedEmails: 0,
-            status: "pending",
-            metadata: { totalBatches: Math.ceil(emails.length / 100) }
-          })
-          .returning();
-
-        processBatchEmails(job.id, emails).catch(error => {
-          console.error("Background processing error:", error);
-        });
-
-        return res.json({
-          message: "Batch validation job created",
-          jobId: job.id
-        });
-      }
-
       console.log(`Processing ${emails.length} emails for validation`);
       const results = await validateEmailsPython(emails);
       return res.json(results);
@@ -200,31 +113,6 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.get("/api/validate-emails/batch/:jobId", async (req, res) => {
-    try {
-      const jobId = parseInt(req.params.jobId);
-      const [job] = await db.select().from(validationJobs).where(eq(validationJobs.id, jobId)).limit(1);
-
-      if (!job) {
-        return res.status(404).json({ message: "Job not found" });
-      }
-
-      let results = null;
-      if (job.status === "completed") {
-        results = await db.select().from(validationResults).where(eq(validationResults.jobId, jobId));
-      }
-
-      res.json({
-        job,
-        results: results || undefined
-      });
-    } catch (error) {
-      console.error("Error fetching job status:", error);
-      res.status(500).json({
-        message: "Internal server error while fetching job status"
-      });
-    }
-  });
 
   // CORS preflight
   app.options("/api/*", (req, res) => {
