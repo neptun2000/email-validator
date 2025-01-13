@@ -1,7 +1,6 @@
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from email_validator import validate_email as validate_email_lib, EmailNotValidError
@@ -46,6 +45,11 @@ class ValidationResult(BaseModel):
     message: str
     isValid: bool
     confidence: float
+
+# Health check endpoint
+@app.get("/")
+async def health_check():
+    return {"status": "healthy"}
 
 # Known email providers
 FREE_EMAIL_PROVIDERS = {
@@ -136,12 +140,12 @@ async def validate_single_email(email: str) -> ValidationResult:
             confidence=0
         )
 
-@app.post("/api/validate-email")
+@app.post("/validate-email")
 async def validate_email(request: EmailRequest) -> ValidationResult:
     """Validate a single email address"""
     return await validate_single_email(request.email)
 
-@app.post("/api/validate-emails")
+@app.post("/validate-emails")
 async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationResult]:
     """Validate multiple email addresses (max 100 per request)"""
     if len(request.emails) > 100:
@@ -150,7 +154,7 @@ async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationRes
     tasks = [validate_single_email(email) for email in request.emails]
     return await asyncio.gather(*tasks)
 
-@app.post("/api/validate-csv")
+@app.post("/validate-csv")
 async def validate_csv_file(file: UploadFile = File(...)) -> List[ValidationResult]:
     """
     Validate email addresses from a CSV file

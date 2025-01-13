@@ -2,23 +2,12 @@ import express, { type Request, Response, NextFunction } from "express";
 import { setupVite, serveStatic, log } from "./vite";
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer } from "http";
+import fetch from 'node-fetch';
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Setup CORS for development
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
-// Add logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -37,6 +26,11 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
+
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "…";
+      }
+
       log(logLine);
     }
   });
@@ -51,19 +45,34 @@ app.use((req, res, next) => {
     // Create HTTP server
     const server = createServer(app);
 
-    // Proxy /api requests to Python FastAPI server
+    // Wait for FastAPI to be ready
+    const waitForFastApi = async (retries = 30, interval = 1000): Promise<boolean> => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const response = await fetch('http://localhost:8000/');
+          if (response.ok) {
+            log('FastAPI server is ready');
+            return true;
+          }
+        } catch (e) {
+          log('Waiting for FastAPI server...');
+        }
+        await new Promise(resolve => setTimeout(resolve, interval));
+      }
+      return false;
+    };
+
+    // Setup proxy configuration
     const proxyConfig = {
       target: 'http://localhost:8000',
       changeOrigin: true,
-      ws: true,
       pathRewrite: {
         '^/api': '', // Remove /api prefix when forwarding to FastAPI
       },
-      logLevel: 'debug',
-      onProxyReq(proxyReq: any, req: any) {
-        log(`Proxying ${req.method} ${req.path} to Python backend`);
+      onProxyReq(proxyReq: any, req: Request) {
+        log(`Proxying ${req.method} ${req.path} to FastAPI backend`);
       },
-      onError(err: Error, req: Request, res: Response) {
+      onError(err: Error, _req: Request, res: Response) {
         log(`Proxy error: ${err.message}`);
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
@@ -72,6 +81,13 @@ app.use((req, res, next) => {
       }
     };
 
+    // Wait for FastAPI before setting up proxy
+    const fastApiReady = await waitForFastApi();
+    if (!fastApiReady) {
+      throw new Error('FastAPI server failed to start');
+    }
+
+    // Setup proxy middleware
     app.use('/api', createProxyMiddleware(proxyConfig));
 
     // Error handling middleware

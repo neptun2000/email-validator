@@ -8,7 +8,7 @@ if __name__ == "__main__":
         server_dir = Path(__file__).parent
         os.chdir(server_dir)
 
-        print("Starting Email Validation Platform...")
+        print("Starting Email Validation Platform (FastAPI Backend)...")
 
         # Import FastAPI app and run it
         import uvicorn
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         server.run()
 
     except KeyboardInterrupt:
-        print("\nShutting down server...")
+        print("\nShutting down FastAPI server...")
         sys.exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")

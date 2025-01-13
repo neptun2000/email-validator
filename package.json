@@ -26,6 +26,7 @@
     "http-proxy-middleware": "^3.0.3",
     "jest": "^29.7.0",
     "lucide-react": "^0.471.1",
+    "node-fetch": "^2.6.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.2",
