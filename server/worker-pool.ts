@@ -35,7 +35,8 @@ export class WorkerPool {
     this.activeWorkers++;
 
     try {
-      const worker = new Worker(path.join(__dirname, 'email-validation-utils.js'), {
+      // Use TypeScript worker file with proper extension
+      const worker = new Worker(path.join(__dirname, 'email-validation.worker.ts'), {
         workerData: task
       });
 
