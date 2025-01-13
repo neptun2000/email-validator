@@ -1,19 +1,19 @@
 import dns from 'dns';
 import { promisify } from 'util';
-import { EmailVerifier } from './email-verifier.js';
+import { EmailVerifier } from './email-verifier.ts';
 
 const resolveMx = promisify(dns.resolveMx);
 
 export async function validateEmailForWorker(email, clientIp) {
   try {
-    // Use the same EmailVerifier.verify() method for consistency
     const verificationResult = await EmailVerifier.verify(email, clientIp);
     console.log('Worker verification result:', verificationResult);
 
-    // Special handling for corporate domains
-    const status = verificationResult.isCatchAll && verificationResult.isCorporate 
-      ? "catch-all" 
-      : verificationResult.valid ? "valid" : "invalid";
+    // Format status with reason if available
+    let status = verificationResult.valid ? "valid" : "invalid";
+    if (verificationResult.reason) {
+      status = `${status.toUpperCase()} (${verificationResult.reason})`;
+    }
 
     const [account, domain] = email.split("@");
     const { firstName, lastName } = extractNameFromEmail(account);
@@ -38,7 +38,7 @@ export async function validateEmailForWorker(email, clientIp) {
   } catch (error) {
     console.error("Email validation error in worker:", error);
     return {
-      status: "error",
+      status: "ERROR (system_error)",
       subStatus: "system_error",
       freeEmail: "Unknown",
       didYouMean: "",

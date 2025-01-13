@@ -1,25 +1,37 @@
 import dns from 'dns';
 import { promisify } from 'util';
-import { EmailVerifier } from './email-verifier.js'; // Add .js extension
+import { EmailVerifier } from './email-verifier';
 
 const resolveMx = promisify(dns.resolveMx);
 
-export async function validateEmailForWorker(email: string, clientIp: string) {
+interface ValidationResult {
+  status: string;
+  subStatus: string | null;
+  freeEmail: string;
+  didYouMean: string;
+  account: string;
+  domain: string;
+  domainAgeDays: string;
+  smtpProvider: string;
+  mxFound: string;
+  mxRecord: string | null;
+  dmarcPolicy: string | null;
+  firstName: string;
+  lastName: string;
+  message: string;
+  isValid: boolean;
+}
+
+export async function validateEmailForWorker(email: string, clientIp: string): Promise<ValidationResult> {
   try {
     const verificationResult = await EmailVerifier.verify(email, clientIp);
     console.log('Worker verification result:', verificationResult);
-
-    // Format status with reason if available
-    let status = verificationResult.valid ? "valid" : "invalid";
-    if (verificationResult.reason) {
-      status = `${status.toUpperCase()} (${verificationResult.reason})`;
-    }
 
     const [account, domain] = email.split("@");
     const { firstName, lastName } = extractNameFromEmail(account);
 
     return {
-      status,
+      status: verificationResult.valid ? "valid" : "invalid",
       subStatus: verificationResult.reason || null,
       freeEmail: "No",
       didYouMean: "",
@@ -38,7 +50,7 @@ export async function validateEmailForWorker(email: string, clientIp: string) {
   } catch (error) {
     console.error("Email validation error in worker:", error);
     return {
-      status: "ERROR (system_error)",
+      status: "invalid",
       subStatus: "system_error",
       freeEmail: "Unknown",
       didYouMean: "",
@@ -57,7 +69,7 @@ export async function validateEmailForWorker(email: string, clientIp: string) {
   }
 }
 
-function extractNameFromEmail(account: string) {
+function extractNameFromEmail(account: string): { firstName: string; lastName: string } {
   const nameParts = account
     .replace(/[._]/g, ' ')
     .split(' ')
