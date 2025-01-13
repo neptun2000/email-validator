@@ -1,27 +1,17 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { Mail, Loader2, X } from "lucide-react";
+import { Mail, Loader2, X, Upload, Download } from "lucide-react";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
-
-const PREDEFINED_EMAILS = [
-  'ashleybhorton@meta.com',
-  'michael.naumov@teva.co.il',
-  'janerose@google.com',
-  'michael@ringsize.ru',
-  'neptun2000@yandex.ru',
-  'vkroz@amazon.com',
-  'mark.maalouf@tevapharm.com',
-  'smquadrat@gmail.com'
-];
 
 const formSchema = z.object({
   emailList: z.string()
@@ -63,6 +53,8 @@ interface ValidationResult {
 
 export function BulkEmailValidator() {
   const [results, setResults] = useState<ValidationResult[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const form = useForm<FormData>({
@@ -73,11 +65,11 @@ export function BulkEmailValidator() {
   });
 
   const validateEmails = useMutation({
-    mutationFn: async (emails: string[]) => {
+    mutationFn: async (data: { emailList: string[] }) => {
       const response = await fetch("/api/validate-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emails }),
+        body: JSON.stringify({ emails: data.emailList }),
       });
 
       if (!response.ok) {
@@ -105,16 +97,81 @@ export function BulkEmailValidator() {
   });
 
   const onSubmit = (data: FormData) => {
-    validateEmails.mutate(data.emailList);
+    validateEmails.mutate({ emailList: data.emailList });
   };
 
   const clearForm = () => {
     form.reset();
     setResults([]);
+    setFileError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
-  const loadPredefinedEmails = () => {
-    form.setValue('emailList', PREDEFINED_EMAILS.join('\n'));
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError(null);
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
+      setFileError('Please upload a CSV file');
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        setFileError('CSV file is empty');
+        return;
+      }
+
+      // Extract emails from the first column
+      const emails = lines.map(line => line.split(',')[0].trim())
+        .filter(email => email && isValidEmailFormat(email));
+
+      if (emails.length === 0) {
+        setFileError('No valid email addresses found in the CSV');
+        return;
+      }
+
+      if (emails.length > 100) {
+        setFileError('Maximum 100 emails allowed per request');
+        return;
+      }
+
+      form.setValue('emailList', emails.join('\n'));
+    } catch (error) {
+      setFileError('Error reading CSV file');
+      console.error('CSV parsing error:', error);
+    }
+  };
+
+  const downloadResults = () => {
+    if (results.length === 0) return;
+
+    const csvContent = [
+      ['Email', 'Status', 'Message', 'Domain', 'MX Record', 'Is Valid'].join(','),
+      ...results.map(result => [
+        result.email,
+        result.status,
+        result.message.replace(/,/g, ';'),
+        result.domain,
+        result.mxRecord || 'None',
+        result.isValid
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'email-validation-results.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
   return (
@@ -122,16 +179,45 @@ export function BulkEmailValidator() {
       <CardContent className="pt-6">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="flex justify-end mb-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={loadPredefinedEmails}
-                className="text-sm"
-              >
-                Load Test Emails
-              </Button>
+            <div className="flex justify-end gap-2 mb-2">
+              <div className="relative">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  ref={fileInputRef}
+                  className="hidden"
+                  id="csv-upload"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-sm"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload CSV
+                </Button>
+              </div>
+              {results.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={downloadResults}
+                  className="text-sm"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Results
+                </Button>
+              )}
             </div>
+
+            {fileError && (
+              <Alert variant="destructive">
+                <AlertDescription>{fileError}</AlertDescription>
+              </Alert>
+            )}
+
             <FormField
               control={form.control}
               name="emailList"
@@ -141,7 +227,7 @@ export function BulkEmailValidator() {
                     <div className="relative">
                       <Textarea
                         {...field}
-                        placeholder="Enter email addresses (one per line or comma-separated)"
+                        placeholder="Enter email addresses (one per line) or upload a CSV file"
                         className="min-h-[100px] pl-10 pr-8"
                         disabled={validateEmails.isPending}
                       />
