@@ -15,7 +15,7 @@ export default function Home() {
 
         <Tabs defaultValue="validation" className="space-y-6">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="validation">Validation</TabsTrigger>
+            <TabsTrigger value="validation">Single Validation</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Check</TabsTrigger>
           </TabsList>
 

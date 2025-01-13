@@ -1,18 +1,16 @@
 import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Mail, Loader2, X, Upload, Download, Eye, EyeOff } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Mail, Loader2, X, Upload, Eye, EyeOff } from "lucide-react";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { z } from "zod";
-import { isValidEmailFormat } from "@/lib/validation";
 
 const formSchema = z.object({
   emailList: z.string()
@@ -35,8 +33,6 @@ interface ValidationResult {
   smtpProvider: string;
   mxFound: string;
   mxRecord: string | null;
-  firstName: string;
-  lastName: string;
   message: string;
   isValid: boolean;
 }
@@ -47,20 +43,11 @@ interface PreviewEmail {
   error?: string;
 }
 
-interface BatchJob {
-  id: number;
-  status: string;
-  totalEmails: number;
-  processedEmails: number;
-  error?: string;
-}
-
 export function BulkEmailValidator() {
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [previewEmails, setPreviewEmails] = useState<PreviewEmail[]>([]);
   const [showPreview, setShowPreview] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -71,40 +58,9 @@ export function BulkEmailValidator() {
     }
   });
 
-  const { data: jobStatus } = useQuery<{ job: BatchJob; results?: ValidationResult[] }>({
-    queryKey: ['validationJob', activeJobId],
-    enabled: !!activeJobId,
-    refetchInterval: (data) => {
-      if (!data?.job || !data.job.status) {
-        return false;
-      }
-      return ['pending', 'processing'].includes(data.job.status) ? 2000 : false;
-    },
-    onSuccess: (data) => {
-      if (!data?.job) return;
-
-      if (['completed', 'failed'].includes(data.job.status)) {
-        if (data.job.status === 'completed' && data.results) {
-          setResults(data.results);
-          toast({
-            title: "Validation Complete",
-            description: `Successfully validated ${data.results.length} emails`,
-          });
-        } else if (data.job.status === 'failed') {
-          toast({
-            title: "Validation Failed",
-            description: data.job.error || "An error occurred during validation",
-            variant: "destructive",
-          });
-        }
-        setActiveJobId(null);
-      }
-    },
-  });
-
   const validateEmails = useMutation({
     mutationFn: async (data: { emailList: string[] }) => {
-      const response = await fetch("/api/validate-emails/batch", {
+      const response = await fetch("/api/validate-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emails: data.emailList }),
@@ -115,22 +71,14 @@ export function BulkEmailValidator() {
         throw new Error(errorText);
       }
 
-      const result = await response.json();
-      if (result.jobId) {
-        setActiveJobId(result.jobId);
-        return null;
-      }
-
-      return result;
+      return response.json();
     },
     onSuccess: (data) => {
-      if (data) {
-        setResults(data);
-        toast({
-          title: "Validation Complete",
-          description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
-        });
-      }
+      setResults(data);
+      toast({
+        title: "Validation Complete",
+        description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
+      });
     },
     onError: (error: Error) => {
       setResults([]);
@@ -152,20 +100,9 @@ export function BulkEmailValidator() {
     setFileError(null);
     setPreviewEmails([]);
     setShowPreview(false);
-    setActiveJobId(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  };
-
-  const updatePreview = (emails: string[]) => {
-    const preview = emails.map(email => ({
-      email,
-      isValid: isValidEmailFormat(email),
-      error: isValidEmailFormat(email) ? undefined : 'Invalid email format'
-    }));
-    setPreviewEmails(preview);
-    setShowPreview(true);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -182,64 +119,30 @@ export function BulkEmailValidator() {
     }
 
     try {
-      const text = await file.text();
-      const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+      const formData = new FormData();
+      formData.append('file', file);
 
-      if (lines.length === 0) {
-        setFileError('CSV file is empty');
+      const response = await fetch('/api/validate-csv', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        setFileError(error);
         return;
       }
 
-      const emails = lines.map(line => line.split(',')[0].trim())
-        .filter(Boolean);
-
-      if (emails.length === 0) {
-        setFileError('No email addresses found in the CSV');
-        return;
-      }
-
-      updatePreview(emails);
-      form.setValue('emailList', emails.join('\n'));
+      const results = await response.json();
+      setResults(results);
+      toast({
+        title: "Validation Complete",
+        description: `Successfully validated ${results.length} email${results.length === 1 ? '' : 's'}`,
+      });
     } catch (error) {
-      setFileError('Error reading CSV file');
-      console.error('CSV parsing error:', error);
+      setFileError('Error processing CSV file');
+      console.error('CSV processing error:', error);
     }
-  };
-
-  const downloadResults = () => {
-    if (results.length === 0) return;
-
-    const csvContent = [
-      ['Email', 'Status', 'Confidence', 'Message', 'Domain', 'MX Record', 'Is Valid'].join(','),
-      ...results.map(result => [
-        result.email,
-        result.status,
-        result.confidence,
-        result.message.replace(/,/g, ';'),
-        result.domain,
-        result.mxRecord || 'None',
-        result.isValid
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'email-validation-results.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-  };
-
-  const getStatusColor = (result: ValidationResult) => {
-    if (result.isValid) {
-      if (result.confidence >= 80) return "text-green-600";
-      if (result.confidence >= 50) return "text-yellow-600";
-      return "text-orange-600";
-    }
-    return "text-red-600";
   };
 
   return (
@@ -259,7 +162,7 @@ export function BulkEmailValidator() {
                     'employee@microsoft.com',
                   ].join('\n');
                   form.setValue('emailList', testEmails);
-                  updatePreview(testEmails.split('\n'));
+                  setShowPreview(true);
                 }}
                 className="text-sm"
               >
@@ -304,58 +207,11 @@ export function BulkEmailValidator() {
                   )}
                 </Button>
               )}
-              {results.length > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={downloadResults}
-                  className="text-sm"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download Results
-                </Button>
-              )}
             </div>
 
             {fileError && (
               <Alert variant="destructive">
                 <AlertDescription>{fileError}</AlertDescription>
-              </Alert>
-            )}
-
-            {showPreview && previewEmails.length > 0 && (
-              <div className="mb-4 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {previewEmails.map((preview, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{preview.email}</TableCell>
-                        <TableCell className={preview.isValid ? "text-green-600" : "text-red-600"}>
-                          {preview.isValid ? "Valid Format" : preview.error}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-
-            {activeJobId && jobStatus?.job && (
-              <Alert>
-                <div className="space-y-2">
-                  <Progress 
-                    value={Math.round((jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100)} 
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Processed {jobStatus.job.processedEmails} of {jobStatus.job.totalEmails} emails
-                  </p>
-                </div>
               </Alert>
             )}
 
@@ -369,8 +225,7 @@ export function BulkEmailValidator() {
                       <Textarea
                         {...field}
                         placeholder="Enter email addresses (one per line) or upload a CSV file"
-                        className="min-h-[100px] pl-10 pr-8"
-                        disabled={validateEmails.isPending || !!activeJobId}
+                        className="min-h-[100px] pl-10"
                       />
                       <Mail className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
                       {field.value && (
@@ -380,7 +235,6 @@ export function BulkEmailValidator() {
                           size="sm"
                           className="absolute right-2 top-2 h-5 w-5 p-0"
                           onClick={clearForm}
-                          disabled={validateEmails.isPending || !!activeJobId}
                         >
                           <X className="h-4 w-4" />
                         </Button>
@@ -395,12 +249,12 @@ export function BulkEmailValidator() {
             <Button 
               type="submit" 
               className="w-full"
-              disabled={validateEmails.isPending || !!activeJobId}
+              disabled={validateEmails.isPending}
             >
-              {validateEmails.isPending || activeJobId ? (
+              {validateEmails.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {activeJobId ? "Processing..." : "Validating emails..."}
+                  Validating emails...
                 </>
               ) : (
                 "Validate Emails"
@@ -416,7 +270,6 @@ export function BulkEmailValidator() {
                 <TableRow>
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Confidence</TableHead>
                   <TableHead>Message</TableHead>
                   <TableHead>Domain</TableHead>
                   <TableHead>MX Record</TableHead>
@@ -426,16 +279,8 @@ export function BulkEmailValidator() {
                 {results.map((result, index) => (
                   <TableRow key={index}>
                     <TableCell>{result.email}</TableCell>
-                    <TableCell className={getStatusColor(result)}>
+                    <TableCell className={result.isValid ? "text-green-600" : "text-red-600"}>
                       {result.status}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Progress value={result.confidence} className="w-20" />
-                        <span className="text-sm text-muted-foreground">
-                          {result.confidence.toFixed(1)}%
-                        </span>
-                      </div>
                     </TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>{result.domain}</TableCell>

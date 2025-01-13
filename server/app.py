@@ -1,11 +1,15 @@
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from email_validator import validate_email as validate_email_lib, EmailNotValidError
 import dns.resolver
 import asyncio
 import re
+import csv
+from io import StringIO
 
 app = FastAPI(title="Email Validation Platform")
 
@@ -144,6 +148,47 @@ async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationRes
         raise HTTPException(status_code=400, detail="Maximum 100 emails per request")
 
     tasks = [validate_single_email(email) for email in request.emails]
+    return await asyncio.gather(*tasks)
+
+@app.post("/api/validate-csv")
+async def validate_csv_file(file: UploadFile = File(...)) -> List[ValidationResult]:
+    """
+    Validate email addresses from a CSV file
+    The CSV should have an email column, either as the first column or with a header
+    """
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+
+    content = await file.read()
+    text = content.decode('utf-8')
+
+    # Parse CSV content
+    csv_reader = csv.reader(StringIO(text))
+    emails = []
+
+    # Read the first row to check if it's a header
+    try:
+        first_row = next(csv_reader)
+        # If the first column contains 'email' (case insensitive), treat as header
+        if first_row[0].lower() == 'email':
+            emails = [row[0].strip() for row in csv_reader if row and row[0].strip()]
+        else:
+            # No header, include first row
+            emails = [first_row[0].strip()]
+            emails.extend(row[0].strip() for row in csv_reader if row and row[0].strip())
+    except StopIteration:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing CSV file: {str(e)}")
+
+    # Limit to 100 emails
+    if len(emails) > 100:
+        emails = emails[:100]
+    elif not emails:
+        raise HTTPException(status_code=400, detail="No valid email addresses found in CSV")
+
+    # Validate all emails
+    tasks = [validate_single_email(email) for email in emails]
     return await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
