@@ -35,8 +35,7 @@ export class WorkerPool {
     this.activeWorkers++;
 
     try {
-      // Use .js extension for the worker file since it will be compiled
-      const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
+      const worker = new Worker(path.join(__dirname, 'email-validation-utils.js'), {
         workerData: task
       });
 
