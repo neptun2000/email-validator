@@ -7,13 +7,11 @@ import path from "path";
 import { db } from "@db";
 import { validationJobs, validationResults } from "@db/schema";
 import { eq } from "drizzle-orm";
-import { metricsTracker } from "./metrics";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function validateEmailsPython(emails: string[]): Promise<any> {
-  const startTime = Date.now();
   return new Promise((resolve, reject) => {
     console.log("Starting Python validation process...");
     const pythonProcess = spawn("python3", [
@@ -38,10 +36,6 @@ async function validateEmailsPython(emails: string[]): Promise<any> {
       if (code === 0 && result) {
         try {
           const parsedResult = JSON.parse(result);
-          // Record metrics for each validation
-          parsedResult.forEach((r: any) => {
-            metricsTracker.recordValidation(startTime, r.isValid);
-          });
           console.log("Successfully parsed validation results");
           resolve(parsedResult);
         } catch (e) {
@@ -130,17 +124,6 @@ export function registerRoutes(app: Express): Server {
     next();
   });
 
-  // Add metrics endpoint
-  app.get("/api/metrics", (_req, res) => {
-    try {
-      res.json(metricsTracker.getMetrics());
-    } catch (error) {
-      console.error("Error retrieving metrics:", error);
-      res.status(500).json({
-        message: "Error retrieving metrics"
-      });
-    }
-  });
 
   app.post("/api/validate-emails/batch", async (req, res) => {
     try {

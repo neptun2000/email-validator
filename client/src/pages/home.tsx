@@ -1,6 +1,5 @@
 import { EmailValidator } from "@/components/email-validator";
 import { BulkEmailValidator } from "@/components/bulk-email-validator";
-import { ValidationMetrics } from "@/components/validation-metrics";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Home() {
@@ -15,10 +14,9 @@ export default function Home() {
         </div>
 
         <Tabs defaultValue="validation" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="validation">Validation</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Check</TabsTrigger>
-            <TabsTrigger value="metrics">Statistics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="validation">
@@ -27,10 +25,6 @@ export default function Home() {
 
           <TabsContent value="bulk">
             <BulkEmailValidator />
-          </TabsContent>
-
-          <TabsContent value="metrics">
-            <ValidationMetrics />
           </TabsContent>
         </Tabs>
       </div>
