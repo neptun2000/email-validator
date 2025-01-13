@@ -24,7 +24,7 @@ const PREDEFINED_EMAILS = [
 ];
 
 const formSchema = z.object({
-  emails: z.string()
+  emailList: z.string()
     .min(1, "Please enter at least one email address")
     .transform(value => value.split(/[\n,]/).map(email => email.trim()).filter(Boolean))
     .refine(
@@ -41,9 +41,7 @@ const formSchema = z.object({
     )
 });
 
-type FormData = {
-  emails: string;
-};
+type FormData = z.infer<typeof formSchema>;
 
 interface ValidationResult {
   email: string;
@@ -70,13 +68,12 @@ export function BulkEmailValidator() {
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      emails: "",
-    },
+      emailList: ""
+    }
   });
 
   const validateEmails = useMutation({
-    mutationFn: async (data: FormData) => {
-      const emails = data.emails.split(/[\n,]/).map(email => email.trim()).filter(Boolean);
+    mutationFn: async (emails: string[]) => {
       const response = await fetch("/api/validate-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,7 +105,7 @@ export function BulkEmailValidator() {
   });
 
   const onSubmit = (data: FormData) => {
-    validateEmails.mutate(data);
+    validateEmails.mutate(data.emailList);
   };
 
   const clearForm = () => {
@@ -117,7 +114,7 @@ export function BulkEmailValidator() {
   };
 
   const loadPredefinedEmails = () => {
-    form.setValue('emails', PREDEFINED_EMAILS.join('\n'));
+    form.setValue('emailList', PREDEFINED_EMAILS.join('\n'));
   };
 
   return (
@@ -137,7 +134,7 @@ export function BulkEmailValidator() {
             </div>
             <FormField
               control={form.control}
-              name="emails"
+              name="emailList"
               render={({ field }) => (
                 <FormItem>
                   <FormControl>
