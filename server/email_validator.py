@@ -21,6 +21,17 @@ class EmailValidator:
             'adobe.com', 'vmware.com', 'sap.com'
         }
 
+        # Common disposable email domains
+        self.disposable_domains = {
+            'temp-mail.org', 'tempmail.com', 'disposablemail.com', 
+            'mailinator.com', 'guerrillamail.com', 'sharklasers.com',
+            'throwawaymail.com', '10minutemail.com', 'tempinbox.com',
+            'yopmail.com', 'tempr.email', 'temp-mail.io', 'fake-email.com',
+            'tempmail.net', 'disposable.com', 'mailnesia.com', 'tempmailaddress.com',
+            'tempmail.de', 'dispostable.com', 'spam4.me', 'trashmail.com',
+            'maildrop.cc', 'tempmails.net', 'temporary-mail.net'
+        }
+
     def extract_name_from_email(self, account: str) -> Dict[str, str]:
         name_parts = re.sub(r'[._]', ' ', account).split()
         name_parts = [part.capitalize() for part in name_parts if part]
@@ -34,6 +45,10 @@ class EmailValidator:
             'firstName': name_parts[0] if name_parts else 'Unknown',
             'lastName': 'Unknown'
         }
+
+    def is_disposable_email(self, domain: str) -> bool:
+        """Check if the email domain is a known disposable email provider"""
+        return domain.lower() in self.disposable_domains
 
     def verify_smtp(self, email: str, domain: str, mx_record: str) -> bool:
         """Verify email existence using SMTP check"""
@@ -69,6 +84,26 @@ class EmailValidator:
                 return self._create_error_result(email, "Invalid email format")
 
             local_part, domain = email.split('@')
+
+            # Check if it's a disposable email
+            if self.is_disposable_email(domain):
+                return {
+                    'email': email,
+                    'status': 'invalid',
+                    'subStatus': 'disposable',
+                    'freeEmail': "Yes",
+                    'didYouMean': "",
+                    'account': local_part,
+                    'domain': domain,
+                    'domainAgeDays': "Unknown",
+                    'smtpProvider': "Unknown",
+                    'mxFound': "No",
+                    'mxRecord': None,
+                    'firstName': self.extract_name_from_email(local_part)['firstName'],
+                    'lastName': self.extract_name_from_email(local_part)['lastName'],
+                    'message': "Disposable email addresses are not allowed",
+                    'isValid': False
+                }
 
             # Check MX records
             try:
@@ -173,7 +208,8 @@ if __name__ == "__main__":
                 "test@example.com",
                 "user@google.com",
                 "invalid.email",
-                "employee@microsoft.com"
+                "employee@microsoft.com",
+                "test@tempmail.com"
             ]
             logger.info("Using default test emails")
 
