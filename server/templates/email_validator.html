@@ -44,6 +44,25 @@
 
         <!-- Bulk Email Validation -->
         <div id="bulk-validation" class="tab-content hidden">
+            <div class="flex justify-end gap-2 mb-4">
+                <button onclick="loadTestEmails()"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
+                    Load Test Emails
+                </button>
+                <label for="csv-upload" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer">
+                    Upload CSV
+                </label>
+                <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleFileUpload(this)">
+            </div>
+
+            <!-- Preview Section -->
+            <div id="preview-section" class="mb-4 hidden">
+                <h3 class="text-sm font-medium text-gray-700 mb-2">Preview</h3>
+                <div class="bg-gray-50 p-4 rounded-md">
+                    <div id="preview-content" class="text-sm text-gray-600"></div>
+                </div>
+            </div>
+
             <form method="POST" action="/validate-bulk" class="space-y-4">
                 <div>
                     <label for="emails" class="block text-sm font-medium text-gray-700">Email Addresses</label>
@@ -104,7 +123,6 @@
                             <span class="text-gray-500">Not configured</span>
                         {% endif %}
                     </div>
-
                     <div class="text-sm font-medium text-gray-500">Disposable Email:</div>
                     <div class="text-sm {% if result.disposable %}text-red-600{% else %}text-green-600{% endif %}">
                         {{ "Yes" if result.disposable else "No" }}
@@ -172,6 +190,66 @@ function showTab(tabName) {
 
     document.getElementById(tabName + '-tab').classList.remove('border-transparent', 'text-gray-500');
     document.getElementById(tabName + '-tab').classList.add('border-primary', 'text-primary');
+}
+
+function loadTestEmails() {
+    const testEmails = [
+        'test@example.com',
+        'user@gmail.com',
+        'invalid.email',
+        'support@microsoft.com',
+        'noreply@amazon.com'
+    ].join('\n');
+
+    document.getElementById('emails').value = testEmails;
+    showPreview(testEmails.split('\n'));
+}
+
+function handleFileUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a CSV file');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const emails = text.split('\n')
+            .map(line => line.split(',')[0].trim())
+            .filter(email => email);
+
+        document.getElementById('emails').value = emails.join('\n');
+        showPreview(emails);
+    };
+    reader.readAsText(file);
+}
+
+function showPreview(emails) {
+    const previewSection = document.getElementById('preview-section');
+    const previewContent = document.getElementById('preview-content');
+
+    // Show preview of first 5 emails
+    const preview = emails.slice(0, 5).map(email => `
+        <div class="mb-1">
+            <span class="inline-block w-6 h-6 mr-2 text-center rounded-full ${isValidEmail(email) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                ${isValidEmail(email) ? '✓' : '✗'}
+            </span>
+            ${email}
+        </div>
+    `).join('');
+
+    const remaining = emails.length > 5 ? `<div class="mt-2 text-gray-500">...and ${emails.length - 5} more</div>` : '';
+
+    previewContent.innerHTML = preview + remaining;
+    previewSection.classList.remove('hidden');
+}
+
+function isValidEmail(email) {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
 }
 
 // Initialize with single validation tab

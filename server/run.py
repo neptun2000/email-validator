@@ -10,19 +10,13 @@ if __name__ == "__main__":
 
         print("Starting Email Validation Platform...")
 
-        # Create necessary directories
-        templates_dir = server_dir / "templates"
-        static_dir = server_dir / "static"
-        templates_dir.mkdir(exist_ok=True)
-        static_dir.mkdir(exist_ok=True)
-
         # Import FastAPI app and run it
         import uvicorn
         from app import app
 
         config = uvicorn.Config(
             app=app,
-            host="0.0.0.0",
+            host="0.0.0.0",  # Listen on all interfaces
             port=8000,
             reload=True,
             log_level="info"
