@@ -1,108 +1,61 @@
 import dns from 'dns';
 import { promisify } from 'util';
-import { EmailVerifier } from './email-verifier.js';
-import { parentPort, workerData } from 'worker_threads';
 
 const resolveMx = promisify(dns.resolveMx);
 
 interface ValidationResult {
   status: string;
-  subStatus: string | null;
-  freeEmail: string;
-  didYouMean: string;
-  account: string;
-  domain: string;
-  domainAgeDays: string;
-  smtpProvider: string;
-  mxFound: string;
-  mxRecord: string | null;
-  dmarcPolicy: string | null;
-  firstName: string;
-  lastName: string;
   message: string;
+  domain: string;
+  mxRecord: string | null;
   isValid: boolean;
 }
 
-export async function validateEmailForWorker(email: string, clientIp: string): Promise<ValidationResult> {
+export async function validateEmail(email: string): Promise<ValidationResult> {
   try {
-    const verificationResult = await EmailVerifier.verify(email, clientIp);
-    console.log('Worker verification result:', verificationResult);
+    // Basic format check
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return {
+        status: "invalid",
+        message: "Invalid email format",
+        domain: email.split('@')[1] || "unknown",
+        mxRecord: null,
+        isValid: false
+      };
+    }
 
-    const [account, domain] = email.split("@");
-    const { firstName, lastName } = extractNameFromEmail(account);
+    const [, domain] = email.split("@");
 
-    return {
-      status: verificationResult.valid ? "valid" : "invalid",
-      subStatus: verificationResult.reason || null,
-      freeEmail: "No",
-      didYouMean: "",
-      account,
-      domain,
-      domainAgeDays: "Unknown",
-      smtpProvider: verificationResult.mxRecord ? verificationResult.mxRecord.split('.')[0] : "Unknown",
-      mxFound: verificationResult.mxRecord ? "Yes" : "No",
-      mxRecord: verificationResult.mxRecord || null,
-      dmarcPolicy: verificationResult.dmarcPolicy || null,
-      firstName,
-      lastName,
-      message: verificationResult.reason || (verificationResult.valid ? "Valid email address" : "Invalid email address"),
-      isValid: verificationResult.valid
-    };
+    // Check MX records
+    try {
+      const records = await resolveMx(domain);
+      const mxRecord = records[0]?.exchange || null;
+
+      return {
+        status: "valid",
+        message: "Valid email address",
+        domain,
+        mxRecord,
+        isValid: true
+      };
+    } catch (error) {
+      return {
+        status: "invalid",
+        message: "Domain does not have valid MX records",
+        domain,
+        mxRecord: null,
+        isValid: false
+      };
+    }
   } catch (error) {
-    console.error("Email validation error in worker:", error);
+    console.error("Email validation error:", error);
     return {
-      status: "invalid",
-      subStatus: "system_error",
-      freeEmail: "Unknown",
-      didYouMean: "",
-      account: "Unknown",
-      domain: "Unknown",
-      domainAgeDays: "Unknown",
-      smtpProvider: "Unknown",
-      mxFound: "No",
-      mxRecord: null,
-      dmarcPolicy: null,
-      firstName: "Unknown",
-      lastName: "Unknown",
+      status: "error",
       message: error instanceof Error ? error.message : "Failed to validate email",
+      domain: "unknown",
+      mxRecord: null,
       isValid: false
     };
   }
-}
-
-function extractNameFromEmail(account: string): { firstName: string; lastName: string } {
-  const nameParts = account
-    .replace(/[._]/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
-
-  if (nameParts.length >= 2) {
-    return {
-      firstName: nameParts[0],
-      lastName: nameParts.slice(1).join(' ')
-    };
-  }
-
-  return {
-    firstName: nameParts[0] || 'Unknown',
-    lastName: 'Unknown'
-  };
-}
-
-// Add worker thread handling directly in this file
-if (parentPort) {
-  (async () => {
-    try {
-      const { email, clientIp } = workerData;
-      const result = await validateEmailForWorker(email, clientIp);
-      parentPort.postMessage({ success: true, result });
-    } catch (error) {
-      console.error('Worker error:', error);
-      parentPort.postMessage({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
-      });
-    }
-  })();
 }
