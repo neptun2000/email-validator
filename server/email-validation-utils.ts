@@ -1,6 +1,6 @@
 import dns from 'dns';
 import { promisify } from 'util';
-import { EmailVerifier } from './email-verifier.js';
+import { EmailVerifier } from './email-verifier.js'; // Add .js extension
 
 const resolveMx = promisify(dns.resolveMx);
 

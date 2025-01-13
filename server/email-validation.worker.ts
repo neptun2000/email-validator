@@ -3,12 +3,14 @@ import { validateEmailForWorker } from './email-validation-utils.js';
 
 async function validateEmailInWorker() {
   const { email, clientIp } = workerData;
+
   try {
     const result = await validateEmailForWorker(email, clientIp);
     if (parentPort) {
       parentPort.postMessage({ success: true, result });
     }
   } catch (error) {
+    console.error('Worker error:', error);
     if (parentPort) {
       parentPort.postMessage({
         success: false,
@@ -18,7 +20,6 @@ async function validateEmailInWorker() {
   }
 }
 
-// Execute worker
 validateEmailInWorker().catch(error => {
   console.error('Worker error:', error);
   if (parentPort) {

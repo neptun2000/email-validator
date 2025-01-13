@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import net from 'net';
 import dns from 'dns';
 import { promisify } from 'util';
-import { SmtpVerifier, VerificationError } from './smtp-verifier';
+import { SmtpVerifier, VerificationError } from './smtp-verifier.js';
 
 const resolveMx = promisify(dns.resolveMx);
 const resolveTxt = promisify(dns.resolveTxt);
