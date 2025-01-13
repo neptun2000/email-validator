@@ -7,11 +7,13 @@ import path from "path";
 import { db } from "@db";
 import { validationJobs, validationResults } from "@db/schema";
 import { eq } from "drizzle-orm";
+import { metricsTracker } from "./metrics";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function validateEmailsPython(emails: string[]): Promise<any> {
+  const startTime = Date.now();
   return new Promise((resolve, reject) => {
     console.log("Starting Python validation process...");
     const pythonProcess = spawn("python3", [
@@ -36,6 +38,10 @@ async function validateEmailsPython(emails: string[]): Promise<any> {
       if (code === 0 && result) {
         try {
           const parsedResult = JSON.parse(result);
+          // Record metrics for each validation
+          parsedResult.forEach((r: any) => {
+            metricsTracker.recordValidation(startTime, r.isValid);
+          });
           console.log("Successfully parsed validation results");
           resolve(parsedResult);
         } catch (e) {
@@ -60,7 +66,6 @@ async function processBatchEmails(jobId: number, emails: string[]) {
   let processedCount = 0;
 
   try {
-    // Update job status to processing
     await db.update(validationJobs)
       .set({
         status: "processing",
@@ -74,7 +79,6 @@ async function processBatchEmails(jobId: number, emails: string[]) {
 
       const results = await validateEmailsPython(batch);
 
-      // Store results in database
       await db.insert(validationResults).values(
         results.map((result: any) => ({
           jobId,
@@ -90,7 +94,6 @@ async function processBatchEmails(jobId: number, emails: string[]) {
 
       processedCount += batch.length;
 
-      // Update job progress
       await db.update(validationJobs)
         .set({
           processedEmails: processedCount,
@@ -99,7 +102,6 @@ async function processBatchEmails(jobId: number, emails: string[]) {
         .where(eq(validationJobs.id, jobId));
     }
 
-    // Mark job as completed
     await db.update(validationJobs)
       .set({
         status: "completed",
@@ -122,11 +124,22 @@ async function processBatchEmails(jobId: number, emails: string[]) {
 }
 
 export function registerRoutes(app: Express): Server {
-  // Add CORS headers for API access
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
+  });
+
+  // Add metrics endpoint
+  app.get("/api/metrics", (_req, res) => {
+    try {
+      res.json(metricsTracker.getMetrics());
+    } catch (error) {
+      console.error("Error retrieving metrics:", error);
+      res.status(500).json({
+        message: "Error retrieving metrics"
+      });
+    }
   });
 
   app.post("/api/validate-emails/batch", async (req, res) => {
@@ -139,7 +152,6 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      // For large batches, create a job and process asynchronously
       if (emails.length > 100) {
         const [job] = await db.insert(validationJobs)
           .values({
@@ -150,7 +162,6 @@ export function registerRoutes(app: Express): Server {
           })
           .returning();
 
-        // Start processing in background
         processBatchEmails(job.id, emails).catch(error => {
           console.error("Background processing error:", error);
         });
@@ -161,7 +172,6 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      // For small batches, process immediately
       console.log(`Processing ${emails.length} emails for validation`);
       const results = await validateEmailsPython(emails);
       return res.json(results);
@@ -182,7 +192,6 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).json({ message: "Job not found" });
       }
 
-      // If job is completed, include results
       let results = null;
       if (job.status === "completed") {
         results = await db.select().from(validationResults).where(eq(validationResults.jobId, jobId));
@@ -221,7 +230,6 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Options for CORS preflight requests
   app.options("/api/*", (req, res) => {
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
