@@ -1,7 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { spawn } from "child_process";
-import { promisify } from "util";
 import { fileURLToPath } from "url";
 import path from "path";
 import { db } from "@db";
@@ -14,44 +13,51 @@ const __dirname = path.dirname(__filename);
 async function validateEmailsPython(emails: string[]): Promise<any> {
   return new Promise((resolve, reject) => {
     console.log("Starting Python validation process...");
-    const pythonProcess = spawn("python3", [
-      path.join(__dirname, "email_validator.py"),
-      JSON.stringify(emails)
-    ]);
 
-    let result = "";
-    let error = "";
+    try {
+      const pythonProcess = spawn("python3", [
+        path.join(__dirname, "email_validator.py"),
+        JSON.stringify(emails)
+      ]);
 
-    pythonProcess.stdout.on("data", (data) => {
-      result += data.toString();
-    });
+      let result = "";
+      let error = "";
 
-    pythonProcess.stderr.on("data", (data) => {
-      error += data.toString();
-      console.error("Python validation error:", data.toString());
-    });
+      pythonProcess.stdout.on("data", (data) => {
+        result += data.toString();
+        console.log("Python validation output:", data.toString());
+      });
 
-    pythonProcess.on("close", (code) => {
-      console.log(`Python process exited with code ${code}`);
-      if (code === 0 && result) {
-        try {
-          const parsedResult = JSON.parse(result);
-          console.log("Successfully parsed validation results");
-          resolve(parsedResult);
-        } catch (e) {
-          console.error("Failed to parse Python script output:", e);
-          reject(new Error("Failed to parse Python script output"));
+      pythonProcess.stderr.on("data", (data) => {
+        error += data.toString();
+        console.error("Python validation error:", data.toString());
+      });
+
+      pythonProcess.on("close", (code) => {
+        console.log(`Python process exited with code ${code}`);
+        if (code === 0 && result) {
+          try {
+            const parsedResult = JSON.parse(result);
+            console.log("Successfully parsed validation results");
+            resolve(parsedResult);
+          } catch (e) {
+            console.error("Failed to parse Python script output:", e);
+            reject(new Error("Failed to parse Python script output"));
+          }
+        } else {
+          console.error("Python script execution failed:", error);
+          reject(new Error(error || "Python script execution failed"));
         }
-      } else {
-        console.error("Python script execution failed:", error);
-        reject(new Error(error || "Python script execution failed"));
-      }
-    });
+      });
 
-    pythonProcess.on("error", (err) => {
-      console.error("Failed to start Python process:", err);
+      pythonProcess.on("error", (err) => {
+        console.error("Failed to start Python process:", err);
+        reject(err);
+      });
+    } catch (err) {
+      console.error("Error spawning Python process:", err);
       reject(err);
-    });
+    }
   });
 }
 
@@ -71,29 +77,34 @@ async function processBatchEmails(jobId: number, emails: string[]) {
       const batch = emails.slice(i, i + batchSize);
       console.log(`Processing batch ${i / batchSize + 1} of ${Math.ceil(emails.length / batchSize)}`);
 
-      const results = await validateEmailsPython(batch);
+      try {
+        const results = await validateEmailsPython(batch);
 
-      await db.insert(validationResults).values(
-        results.map((result: any) => ({
-          jobId,
-          email: result.email,
-          isValid: result.isValid,
-          status: result.status,
-          message: result.message,
-          domain: result.domain,
-          mxRecord: result.mxRecord,
-          createdAt: new Date()
-        }))
-      );
+        await db.insert(validationResults).values(
+          results.map((result: any) => ({
+            jobId,
+            email: result.email,
+            isValid: result.isValid,
+            status: result.status,
+            message: result.message,
+            domain: result.domain,
+            mxRecord: result.mxRecord,
+            createdAt: new Date()
+          }))
+        );
 
-      processedCount += batch.length;
+        processedCount += batch.length;
 
-      await db.update(validationJobs)
-        .set({
-          processedEmails: processedCount,
-          updatedAt: new Date(),
-        })
-        .where(eq(validationJobs.id, jobId));
+        await db.update(validationJobs)
+          .set({
+            processedEmails: processedCount,
+            updatedAt: new Date(),
+          })
+          .where(eq(validationJobs.id, jobId));
+      } catch (error) {
+        console.error("Batch validation error:", error);
+        throw error;
+      }
     }
 
     await db.update(validationJobs)
@@ -118,13 +129,36 @@ async function processBatchEmails(jobId: number, emails: string[]) {
 }
 
 export function registerRoutes(app: Express): Server {
+  // CORS middleware
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
   });
 
+  // Single email validation endpoint
+  app.post("/api/validate-email", async (req, res) => {
+    try {
+      const { email } = req.body;
 
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({
+          message: "Email is required and must be a string"
+        });
+      }
+
+      console.log("Processing single email validation:", email);
+      const results = await validateEmailsPython([email]);
+      return res.json(results[0]);
+    } catch (error) {
+      console.error("Email validation error:", error);
+      res.status(500).json({
+        message: "Internal server error during validation"
+      });
+    }
+  });
+
+  // Batch email validation endpoints
   app.post("/api/validate-emails/batch", async (req, res) => {
     try {
       const { emails } = req.body;
@@ -192,27 +226,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.post("/api/validate-email", async (req, res) => {
-    try {
-      const { email } = req.body;
-
-      if (!email || typeof email !== "string") {
-        return res.status(400).json({
-          message: "Email is required and must be a string"
-        });
-      }
-
-      console.log("Processing single email validation:", email);
-      const results = await validateEmailsPython([email]);
-      return res.json(results[0]);
-    } catch (error) {
-      console.error("Email validation error:", error);
-      res.status(500).json({
-        message: "Internal server error during validation"
-      });
-    }
-  });
-
+  // CORS preflight
   app.options("/api/*", (req, res) => {
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');

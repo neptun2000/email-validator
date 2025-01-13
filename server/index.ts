@@ -6,10 +6,14 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Add CORS middleware
+// Setup CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
   next();
 });
 
@@ -46,6 +50,7 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
+    log("Starting server...");
     const server = registerRoutes(app);
 
     // Error handling middleware
@@ -58,16 +63,19 @@ app.use((req, res, next) => {
 
     // Set up Vite in development or serve static files in production
     if (app.get("env") === "development") {
+      log("Setting up Vite for development...");
       await setupVite(app, server);
     } else {
+      log("Setting up static file serving for production...");
       serveStatic(app);
     }
 
     // Start the server
-    const PORT = 5000;
+    const PORT = process.env.PORT || 5000;
     server.listen(PORT, "0.0.0.0", () => {
       log(`Server running on port ${PORT}`);
     });
+
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);

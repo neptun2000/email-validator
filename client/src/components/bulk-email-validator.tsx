@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
 
@@ -73,14 +73,6 @@ export function BulkEmailValidator() {
 
   const { data: jobStatus } = useQuery<{ job: BatchJob; results?: ValidationResult[] }>({
     queryKey: ['validationJob', activeJobId],
-    queryFn: async () => {
-      if (!activeJobId) return null;
-      const response = await fetch(`/api/validate-emails/batch/${activeJobId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch job status');
-      }
-      return response.json();
-    },
     enabled: !!activeJobId,
     refetchInterval: (data) => {
       if (!data?.job || !data.job.status) {
@@ -241,6 +233,15 @@ export function BulkEmailValidator() {
     window.URL.revokeObjectURL(url);
   };
 
+  const getStatusColor = (result: ValidationResult) => {
+    if (result.isValid) {
+      if (result.confidence >= 80) return "text-green-600";
+      if (result.confidence >= 50) return "text-yellow-600";
+      return "text-orange-600";
+    }
+    return "text-red-600";
+  };
+
   return (
     <Card>
       <CardContent className="pt-6">
@@ -347,17 +348,14 @@ export function BulkEmailValidator() {
 
             {activeJobId && jobStatus?.job && (
               <Alert>
-                <AlertTitle>Processing {jobStatus.job.totalEmails} emails</AlertTitle>
-                <AlertDescription>
-                  <div className="space-y-2">
-                    <Progress 
-                      value={Math.round((jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100)} 
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Processed {jobStatus.job.processedEmails} of {jobStatus.job.totalEmails} emails
-                    </p>
-                  </div>
-                </AlertDescription>
+                <div className="space-y-2">
+                  <Progress 
+                    value={Math.round((jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100)} 
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Processed {jobStatus.job.processedEmails} of {jobStatus.job.totalEmails} emails
+                  </p>
+                </div>
               </Alert>
             )}
 
@@ -428,7 +426,7 @@ export function BulkEmailValidator() {
                 {results.map((result, index) => (
                   <TableRow key={index}>
                     <TableCell>{result.email}</TableCell>
-                    <TableCell className={result.isValid ? "text-green-600" : "text-red-600"}>
+                    <TableCell className={getStatusColor(result)}>
                       {result.status}
                     </TableCell>
                     <TableCell>
