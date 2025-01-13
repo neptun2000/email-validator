@@ -1,7 +1,9 @@
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, EmailStr
 from email_validator import validate_email as validate_email_lib, EmailNotValidError
 import dns.resolver
@@ -9,6 +11,7 @@ import asyncio
 import re
 import csv
 from io import StringIO
+from pathlib import Path
 
 app = FastAPI(title="Email Validation Platform")
 
@@ -20,6 +23,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Setup static files for the React build
+app.mount("/static", StaticFiles(directory="dist/public/static"), name="static")
+app.mount("/assets", StaticFiles(directory="dist/public/assets"), name="assets")
 
 # Models
 class EmailRequest(BaseModel):
@@ -45,11 +52,6 @@ class ValidationResult(BaseModel):
     message: str
     isValid: bool
     confidence: float
-
-# Health check endpoint
-@app.get("/")
-async def health_check():
-    return {"status": "healthy"}
 
 # Known email providers
 FREE_EMAIL_PROVIDERS = {
@@ -140,6 +142,16 @@ async def validate_single_email(email: str) -> ValidationResult:
             confidence=0
         )
 
+@app.get("/")
+async def serve_frontend():
+    """Serve the React frontend"""
+    try:
+        with open("dist/public/index.html", "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(content="Frontend not built. Please run 'npm run build' first.")
+
 @app.post("/validate-email")
 async def validate_email(request: EmailRequest) -> ValidationResult:
     """Validate a single email address"""
@@ -197,4 +209,5 @@ async def validate_csv_file(file: UploadFile = File(...)) -> List[ValidationResu
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    print("Starting FastAPI server on port 8000...")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -8,6 +8,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -26,15 +27,12 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "…";
       }
-
       log(logLine);
     }
   });
-
   next();
 });
 
@@ -55,7 +53,7 @@ app.use((req, res, next) => {
             return true;
           }
         } catch (e) {
-          log('Waiting for FastAPI server...');
+          log(`Waiting for FastAPI server... (attempt ${i + 1}/${retries})`);
         }
         await new Promise(resolve => setTimeout(resolve, interval));
       }
@@ -67,12 +65,21 @@ app.use((req, res, next) => {
       target: 'http://localhost:8000',
       changeOrigin: true,
       pathRewrite: {
-        '^/api': '', // Remove /api prefix when forwarding to FastAPI
+        '^/api/validate-email': '/validate-email',
+        '^/api/validate-emails': '/validate-emails',
+        '^/api/validate-csv': '/validate-csv'
       },
       onProxyReq(proxyReq: any, req: Request) {
+        // If the request has a body, we need to rewrite the body
+        if (req.method === 'POST' && req.body) {
+          const bodyData = JSON.stringify(req.body);
+          proxyReq.setHeader('Content-Type', 'application/json');
+          proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+          proxyReq.write(bodyData);
+        }
         log(`Proxying ${req.method} ${req.path} to FastAPI backend`);
       },
-      onError(err: Error, _req: Request, res: Response) {
+      onError(err: Error, req: Request, res: Response) {
         log(`Proxy error: ${err.message}`);
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 

@@ -10,11 +10,11 @@ def run_fastapi():
         # Change to the server directory
         server_dir = Path(__file__).parent
         os.chdir(server_dir)
-        
+
         # Start FastAPI server
         print("Starting FastAPI server...")
         fastapi_process = subprocess.Popen(
-            [sys.executable, "app.py"],
+            ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -40,13 +40,13 @@ def run_express():
 def main():
     # Start FastAPI first
     fastapi_process = run_fastapi()
-    
+
     # Give FastAPI a moment to start
     time.sleep(2)
-    
+
     # Start Express server
     express_process = run_express()
-    
+
     try:
         # Monitor both processes
         while True:
