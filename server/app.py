@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,9 +24,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Setup static files for the React build
-app.mount("/static", StaticFiles(directory="dist/public/static"), name="static")
-app.mount("/assets", StaticFiles(directory="dist/public/assets"), name="assets")
+# Setup templates and static files
+templates = Jinja2Templates(directory="server/templates")
+app.mount("/static", StaticFiles(directory="server/static"), name="static")
+app.mount("/assets", StaticFiles(directory="server/static/assets"), name="assets")
 
 # Models
 class EmailRequest(BaseModel):
@@ -143,21 +144,19 @@ async def validate_single_email(email: str) -> ValidationResult:
         )
 
 @app.get("/")
-async def serve_frontend():
-    """Serve the React frontend"""
-    try:
-        with open("dist/public/index.html", "r") as f:
-            html_content = f.read()
-        return HTMLResponse(content=html_content)
-    except FileNotFoundError:
-        return HTMLResponse(content="Frontend not built. Please run 'npm run build' first.")
+async def home(request: Request):
+    """Serve the main page"""
+    return templates.TemplateResponse(
+        "email_validator.html",
+        {"request": request}
+    )
 
-@app.post("/validate-email")
+@app.post("/api/validate-email")
 async def validate_email(request: EmailRequest) -> ValidationResult:
     """Validate a single email address"""
     return await validate_single_email(request.email)
 
-@app.post("/validate-emails")
+@app.post("/api/validate-emails")
 async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationResult]:
     """Validate multiple email addresses (max 100 per request)"""
     if len(request.emails) > 100:
@@ -166,7 +165,7 @@ async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationRes
     tasks = [validate_single_email(email) for email in request.emails]
     return await asyncio.gather(*tasks)
 
-@app.post("/validate-csv")
+@app.post("/api/validate-csv")
 async def validate_csv_file(file: UploadFile = File(...)) -> List[ValidationResult]:
     """
     Validate email addresses from a CSV file
@@ -209,5 +208,5 @@ async def validate_csv_file(file: UploadFile = File(...)) -> List[ValidationResu
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting FastAPI server on port 8000...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("Starting FastAPI server...")
+    uvicorn.run(app, host="0.0.0.0", port=5000)
