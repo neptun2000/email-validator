@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Models
 class EmailRequest(BaseModel):
     email: str
 
@@ -65,21 +66,20 @@ class ValidationResult(BaseModel):
     disposable: bool
     dmarcPolicy: Optional[str] = None
 
-# List of known free email providers
+# Known email providers
 FREE_EMAIL_PROVIDERS = {
     'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
     'aol.com', 'mail.com', 'protonmail.com', 'icloud.com', 'yandex.com',
     'zoho.com', 'gmx.com', 'msn.com'
 }
 
-# List of known disposable email domains
 DISPOSABLE_EMAIL_DOMAINS = {
     'tempmail.com', 'throwawaymail.com', 'mailinator.com', '10minutemail.com',
     'guerrillamail.com', 'sharklasers.com', 'getairmail.com', 'yopmail.com',
-    'tempmail.net', 'temp-mail.org', 'fakeinbox.com', 'trash-mail.com',
-    'mt2015.com', 'meltmail.com', 'harakirimail.com', 'mailnesia.com'
+    'tempmail.net', 'temp-mail.org', 'fakeinbox.com', 'trash-mail.com'
 }
 
+# Validation functions
 async def check_dmarc_policy(domain: str) -> Optional[str]:
     """Check DMARC policy for a domain"""
     try:
@@ -89,20 +89,15 @@ async def check_dmarc_policy(domain: str) -> Optional[str]:
             for string in record.strings:
                 dmarc_record = string.decode('utf-8')
                 if dmarc_record.startswith('v=DMARC1'):
-                    # Extract policy
                     match = re.search(r'p=(\w+)', dmarc_record)
                     if match:
                         return match.group(1)
-        return None
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return None
     except Exception:
         return None
 
 async def validate_single_email(email: str) -> ValidationResult:
-    """
-    Validate a single email address with comprehensive checks
-    """
+    """Validate a single email address with comprehensive checks"""
     try:
         # First validate the email format
         validation = validate_email_lib(email, check_deliverability=False)
@@ -147,10 +142,7 @@ async def validate_single_email(email: str) -> ValidationResult:
                 status = "valid"
                 sub_status = None
                 is_valid = True
-                if is_free_email:
-                    message = "Valid free email provider"
-                else:
-                    message = "Valid corporate email"
+                message = "Valid free email provider" if is_free_email else "Valid corporate email"
 
             return ValidationResult(
                 status=status,
@@ -215,7 +207,7 @@ async def validate_single_email(email: str) -> ValidationResult:
             dmarcPolicy=None
         )
 
-# Web UI routes
+# Routes
 @app.get("/")
 async def home(request: Request):
     """Render the main page"""
@@ -231,19 +223,33 @@ async def validate_email_form(request: Request, email: str = Form(...)):
         "email": email
     })
 
-# API routes
-@app.post("/api/validate-email", response_model=ValidationResult)
+@app.post("/validate-bulk")
+async def validate_bulk_emails_form(request: Request, emails: str = Form(...)):
+    """Handle bulk email validation form submission"""
+    # Split emails by newline or comma and clean them
+    email_list = [email.strip() for email in emails.replace(',', '\n').split('\n') if email.strip()]
+
+    # Limit to 100 emails
+    email_list = email_list[:100]
+
+    # Validate all emails
+    tasks = [validate_single_email(email) for email in email_list]
+    bulk_results = await asyncio.gather(*tasks)
+
+    return templates.TemplateResponse("email_validator.html", {
+        "request": request,
+        "bulk_results": bulk_results,
+        "emails": emails
+    })
+
+@app.post("/api/validate-email")
 async def validate_email_api(request: EmailRequest) -> ValidationResult:
-    """
-    Validate a single email address via API
-    """
+    """Validate a single email address via API"""
     return await validate_single_email(request.email)
 
-@app.post("/api/validate-emails", response_model=List[ValidationResult])
+@app.post("/api/validate-emails")
 async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationResult]:
-    """
-    Validate multiple email addresses (max 100 per request)
-    """
+    """Validate multiple email addresses (max 100 per request)"""
     tasks = [validate_single_email(email) for email in request.emails]
     return await asyncio.gather(*tasks)
 
