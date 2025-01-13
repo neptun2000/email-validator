@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 async function validateEmailsPython(emails: string[]): Promise<any> {
   return new Promise((resolve, reject) => {
+    console.log("Starting Python validation process...");
     const pythonProcess = spawn("python3", [
       path.join(__dirname, "email_validator.py"),
       JSON.stringify(emails)
@@ -24,18 +25,29 @@ async function validateEmailsPython(emails: string[]): Promise<any> {
 
     pythonProcess.stderr.on("data", (data) => {
       error += data.toString();
+      console.error("Python validation error:", data.toString());
     });
 
     pythonProcess.on("close", (code) => {
+      console.log(`Python process exited with code ${code}`);
       if (code === 0 && result) {
         try {
-          resolve(JSON.parse(result));
+          const parsedResult = JSON.parse(result);
+          console.log("Successfully parsed validation results");
+          resolve(parsedResult);
         } catch (e) {
+          console.error("Failed to parse Python script output:", e);
           reject(new Error("Failed to parse Python script output"));
         }
       } else {
+        console.error("Python script execution failed:", error);
         reject(new Error(error || "Python script execution failed"));
       }
+    });
+
+    pythonProcess.on("error", (err) => {
+      console.error("Failed to start Python process:", err);
+      reject(err);
     });
   });
 }
@@ -64,6 +76,7 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
+      console.log(`Processing ${emails.length} emails for validation`);
       const results = await validateEmailsPython(emails);
       return res.json(results);
     } catch (error) {
@@ -84,6 +97,7 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
+      console.log("Processing single email validation:", email);
       const results = await validateEmailsPython([email]);
       return res.json(results[0]);
     } catch (error) {
