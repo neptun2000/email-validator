@@ -1,5 +1,4 @@
 import asyncio
-import subprocess
 import sys
 import os
 from pathlib import Path
@@ -36,9 +35,9 @@ async def run_python_server():
     try:
         print("[Python] Starting FastAPI backend server...")
 
-        # Import here to ensure dependencies are loaded
-        import uvicorn
+        # Import FastAPI app
         from app import app
+        import uvicorn
 
         config = uvicorn.Config(
             app=app,

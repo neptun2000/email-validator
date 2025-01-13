@@ -56,6 +56,13 @@ app.use((req, res, next) => {
       target: 'http://localhost:8000',
       changeOrigin: true,
       ws: true,
+      pathRewrite: {
+        '^/api': '/api'  // Keep /api prefix when forwarding
+      },
+      onProxyReq: (proxyReq, req, res) => {
+        // Log proxy requests for debugging
+        log(`Proxying ${req.method} ${req.path} to Python backend`);
+      },
       onError: (err, req, res) => {
         log(`Proxy error: ${err.message}`);
         res.writeHead(503, { 'Content-Type': 'application/json' });
