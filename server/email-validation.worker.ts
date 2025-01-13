@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'worker_threads';
-import { validateEmailForWorker } from './email-validation-utils.ts';
+import { validateEmailForWorker } from './email-validation-utils';
 
 if (!parentPort) {
   throw new Error('This module must be run as a worker thread');
@@ -21,10 +21,8 @@ async function processEmail() {
 
 processEmail().catch(error => {
   console.error('Worker processing error:', error);
-  if (parentPort) {
-    parentPort.postMessage({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    });
-  }
+  parentPort.postMessage({
+    success: false,
+    error: error instanceof Error ? error.message : 'Unknown error occurred'
+  });
 });

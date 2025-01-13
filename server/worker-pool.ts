@@ -34,8 +34,8 @@ export class WorkerPool {
     const { task, resolve, reject } = this.queue.shift()!;
     this.activeWorkers++;
 
-    // Create worker with better error handling
     try {
+      // Use .js extension for the worker file since it will be compiled
       const worker = new Worker(path.join(__dirname, 'email-validation.worker.js'), {
         workerData: task
       });
