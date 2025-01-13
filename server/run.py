@@ -1,58 +1,8 @@
-import asyncio
 import sys
 import os
 from pathlib import Path
 
-async def run_node_server():
-    """Run the Node.js frontend server"""
-    try:
-        print("[Node] Starting Node.js frontend server...")
-        node_process = await asyncio.create_subprocess_exec(
-            'npm', 'run', 'dev',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(Path(__file__).parent.parent)  # Run from project root
-        )
-
-        async def pipe_output(pipe, prefix):
-            while True:
-                line = await pipe.readline()
-                if not line:
-                    break
-                print(f'[{prefix}]', line.decode().strip())
-
-        await asyncio.gather(
-            pipe_output(node_process.stdout, 'Node'),
-            pipe_output(node_process.stderr, 'Node Error')
-        )
-
-    except Exception as e:
-        print(f"[Node] Error starting frontend server: {e}")
-        raise
-
-async def run_python_server():
-    """Run the FastAPI backend server"""
-    try:
-        print("[Python] Starting FastAPI backend server...")
-
-        # Import FastAPI app
-        from app import app
-        import uvicorn
-
-        config = uvicorn.Config(
-            app=app,
-            host="0.0.0.0",
-            port=8000,
-            reload=True,
-            log_level="info"
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
-    except Exception as e:
-        print(f"[Python] Error starting backend server: {e}")
-        raise
-
-async def main():
+if __name__ == "__main__":
     try:
         # Change to the server directory for Python imports
         server_dir = Path(__file__).parent
@@ -60,20 +10,22 @@ async def main():
 
         print("Starting Email Validation Platform...")
 
-        # Run both servers concurrently
-        await asyncio.gather(
-            run_python_server(),
-            run_node_server()
-        )
-    except Exception as e:
-        print(f"Fatal error in main: {e}")
-        sys.exit(1)
+        # Import FastAPI app and run it
+        from app import app
+        import uvicorn
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
+        config = uvicorn.Config(
+            app=app,
+            host="0.0.0.0",
+            port=5000,
+            reload=True,
+            log_level="info"
+        )
+        server = uvicorn.Server(config)
+        server.run()
+
     except KeyboardInterrupt:
-        print("\nShutting down servers...")
+        print("\nShutting down server...")
         sys.exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")

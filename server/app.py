@@ -1,12 +1,16 @@
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request, Form
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, validator
 from email_validator import validate_email as validate_email_lib, EmailNotValidError
 import dns.resolver
 import asyncio
+from pathlib import Path
 
-app = FastAPI(title="Email Validation API")
+app = FastAPI(title="Email Validation Platform")
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # Configure CORS
 app.add_middleware(
@@ -50,7 +54,7 @@ class ValidationResult(BaseModel):
 FREE_EMAIL_PROVIDERS = {
     'gmail.com',
     'yahoo.com',
-    'hotmail.com',  # Free email provider
+    'hotmail.com',
     'outlook.com',
     'live.com',
     'aol.com',
@@ -134,24 +138,6 @@ async def validate_single_email(email: str) -> ValidationResult:
                 isValid=False,
                 confidence=0
             )
-        except dns.resolver.NoAnswer:
-            return ValidationResult(
-                status="invalid",
-                subStatus="no_mx_record",
-                freeEmail="No",
-                didYouMean="",
-                account=account,
-                domain=domain,
-                domainAgeDays="Unknown",
-                smtpProvider="Unknown",
-                mxFound="No",
-                mxRecord=None,
-                firstName=None,
-                lastName=None,
-                message="Domain does not have MX records",
-                isValid=False,
-                confidence=0
-            )
 
     except EmailNotValidError as e:
         domain = email.split('@')[1].lower() if '@' in email else "unknown"
@@ -172,13 +158,26 @@ async def validate_single_email(email: str) -> ValidationResult:
             isValid=False,
             confidence=0
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+# Web UI routes
+@app.get("/")
+async def home(request: Request):
+    return templates.TemplateResponse("email_validator.html", {"request": request})
+
+@app.post("/validate")
+async def validate_email_form(request: Request, email: str = Form(...)):
+    result = await validate_single_email(email)
+    return templates.TemplateResponse("email_validator.html", {
+        "request": request,
+        "result": result,
+        "email": email
+    })
+
+# API routes
 @app.post("/api/validate-email", response_model=ValidationResult)
-async def validate_email(request: EmailRequest) -> ValidationResult:
+async def validate_email_api(request: EmailRequest) -> ValidationResult:
     """
-    Validate a single email address
+    Validate a single email address via API
     """
     return await validate_single_email(request.email)
 
