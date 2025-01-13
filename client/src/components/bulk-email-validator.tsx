@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { Mail, Loader2, X, Upload, Download } from "lucide-react";
+import { Mail, Loader2, X, Upload, Download, Eye, EyeOff } from "lucide-react";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -62,9 +62,17 @@ interface ValidationResult {
   isValid: boolean;
 }
 
+interface PreviewEmail {
+  email: string;
+  isValid: boolean;
+  error?: string;
+}
+
 export function BulkEmailValidator() {
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [previewEmails, setPreviewEmails] = useState<PreviewEmail[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -92,6 +100,8 @@ export function BulkEmailValidator() {
     },
     onSuccess: (data) => {
       setResults(data);
+      setPreviewEmails([]);
+      setShowPreview(false);
       toast({
         title: "Validation Complete",
         description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
@@ -115,6 +125,8 @@ export function BulkEmailValidator() {
     form.reset();
     setResults([]);
     setFileError(null);
+    setPreviewEmails([]);
+    setShowPreview(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -122,10 +134,24 @@ export function BulkEmailValidator() {
 
   const loadPredefinedEmails = () => {
     form.setValue('emailList', PREDEFINED_EMAILS.join('\n'));
+    updatePreview(PREDEFINED_EMAILS);
+  };
+
+  const updatePreview = (emails: string[]) => {
+    const preview = emails.map(email => ({
+      email,
+      isValid: isValidEmailFormat(email),
+      error: isValidEmailFormat(email) ? undefined : 'Invalid email format'
+    }));
+    setPreviewEmails(preview);
+    setShowPreview(true);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     setFileError(null);
+    setPreviewEmails([]);
+    setShowPreview(false);
+
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -144,10 +170,10 @@ export function BulkEmailValidator() {
 
       // Extract emails from the first column
       const emails = lines.map(line => line.split(',')[0].trim())
-        .filter(email => email && isValidEmailFormat(email));
+        .filter(Boolean);
 
       if (emails.length === 0) {
-        setFileError('No valid email addresses found in the CSV');
+        setFileError('No email addresses found in the CSV');
         return;
       }
 
@@ -156,6 +182,8 @@ export function BulkEmailValidator() {
         return;
       }
 
+      // Update preview before setting the form value
+      updatePreview(emails);
       form.setValue('emailList', emails.join('\n'));
     } catch (error) {
       setFileError('Error reading CSV file');
@@ -222,6 +250,26 @@ export function BulkEmailValidator() {
                   Upload CSV
                 </Button>
               </div>
+              {previewEmails.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="text-sm"
+                >
+                  {showPreview ? (
+                    <>
+                      <EyeOff className="w-4 h-4 mr-2" />
+                      Hide Preview
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-4 h-4 mr-2" />
+                      Show Preview
+                    </>
+                  )}
+                </Button>
+              )}
               {results.length > 0 && (
                 <Button
                   type="button"
@@ -239,6 +287,29 @@ export function BulkEmailValidator() {
               <Alert variant="destructive">
                 <AlertDescription>{fileError}</AlertDescription>
               </Alert>
+            )}
+
+            {showPreview && previewEmails.length > 0 && (
+              <div className="mb-4 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewEmails.map((preview, index) => (
+                      <TableRow key={index}>
+                        <TableCell>{preview.email}</TableCell>
+                        <TableCell className={preview.isValid ? "text-green-600" : "text-red-600"}>
+                          {preview.isValid ? "Valid Format" : preview.error}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             <FormField
