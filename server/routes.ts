@@ -60,8 +60,18 @@ async function processBatchEmails(jobId: number, emails: string[]) {
   let processedCount = 0;
 
   try {
+    // Update job status to processing
+    await db.update(validationJobs)
+      .set({
+        status: "processing",
+        updatedAt: new Date(),
+      })
+      .where(eq(validationJobs.id, jobId));
+
     for (let i = 0; i < emails.length; i += batchSize) {
       const batch = emails.slice(i, i + batchSize);
+      console.log(`Processing batch ${i / batchSize + 1} of ${Math.ceil(emails.length / batchSize)}`);
+
       const results = await validateEmailsPython(batch);
 
       // Store results in database
@@ -74,6 +84,7 @@ async function processBatchEmails(jobId: number, emails: string[]) {
           message: result.message,
           domain: result.domain,
           mxRecord: result.mxRecord,
+          createdAt: new Date()
         }))
       );
 
@@ -105,6 +116,8 @@ async function processBatchEmails(jobId: number, emails: string[]) {
         updatedAt: new Date(),
       })
       .where(eq(validationJobs.id, jobId));
+
+    throw error;
   }
 }
 
@@ -138,7 +151,9 @@ export function registerRoutes(app: Express): Server {
           .returning();
 
         // Start processing in background
-        processBatchEmails(job.id, emails);
+        processBatchEmails(job.id, emails).catch(error => {
+          console.error("Background processing error:", error);
+        });
 
         return res.json({
           message: "Batch validation job created",
@@ -202,57 +217,6 @@ export function registerRoutes(app: Express): Server {
       console.error("Email validation error:", error);
       res.status(500).json({
         message: "Internal server error during validation"
-      });
-    }
-  });
-
-  app.get("/api/metrics", (_req, res) => {
-    try {
-      res.json(metricsTracker.getMetrics());
-    } catch (error) {
-      res.status(500).json({
-        message: "Error retrieving metrics"
-      });
-    }
-  });
-
-
-  // Rate Limit Configuration Routes
-  app.get("/api/rate-limit-config", (_req, res) => {
-    try {
-      const config = rateLimitConfig.getConfig();
-      res.json(config);
-    } catch (error) {
-      console.error("Error fetching rate limit config:", error);
-      res.status(500).json({
-        message: "Failed to fetch rate limit configuration"
-      });
-    }
-  });
-
-  app.post("/api/rate-limit-config", (req, res) => {
-    try {
-      const newConfig = req.body;
-
-      // Validate the new configuration
-      const validationError = rateLimitConfig.validateConfig(newConfig);
-      if (validationError) {
-        return res.status(400).json({
-          message: validationError
-        });
-      }
-
-      // Update configuration
-      const updatedConfig = rateLimitConfig.updateConfig(newConfig);
-
-      res.json({
-        message: "Rate limit configuration updated successfully",
-        config: updatedConfig
-      });
-    } catch (error) {
-      console.error("Error updating rate limit config:", error);
-      res.status(500).json({
-        message: "Failed to update rate limit configuration"
       });
     }
   });

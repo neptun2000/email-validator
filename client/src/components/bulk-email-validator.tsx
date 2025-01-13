@@ -82,7 +82,7 @@ export function BulkEmailValidator() {
   });
 
   // Query for batch job status
-  const { data: jobStatus, refetch: refetchJobStatus } = useQuery({
+  const { data: jobStatus } = useQuery({
     queryKey: ['validationJob', activeJobId],
     queryFn: async () => {
       if (!activeJobId) return null;
@@ -93,19 +93,23 @@ export function BulkEmailValidator() {
       return response.json();
     },
     enabled: !!activeJobId,
-    refetchInterval: (data) => {
-      if (!data || ['completed', 'failed'].includes(data.job.status)) {
+    refetchInterval: (data: any) => {
+      // Check if data exists and has the expected structure
+      if (!data?.job || !data.job.status) {
         return false;
       }
-      return 2000; // Poll every 2 seconds for active jobs
+      // Only continue polling if the job is still in progress
+      return ['pending', 'processing'].includes(data.job.status) ? 2000 : false;
     },
     onSuccess: (data) => {
-      if (data && ['completed', 'failed'].includes(data.job.status)) {
+      if (!data?.job) return;
+
+      if (['completed', 'failed'].includes(data.job.status)) {
         if (data.job.status === 'completed') {
-          setResults(data.results);
+          setResults(data.results || []);
           toast({
             title: "Validation Complete",
-            description: `Successfully validated ${data.results.length} emails`,
+            description: `Successfully validated ${data.results?.length || 0} emails`,
           });
         } else {
           toast({
@@ -358,7 +362,9 @@ export function BulkEmailValidator() {
                 <AlertTitle>Processing {jobStatus.job.totalEmails} emails</AlertTitle>
                 <AlertDescription>
                   <div className="space-y-2">
-                    <Progress value={(jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100} />
+                    <Progress 
+                      value={Math.round((jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100)} 
+                    />
                     <p className="text-sm text-muted-foreground">
                       Processed {jobStatus.job.processedEmails} of {jobStatus.job.totalEmails} emails
                     </p>
