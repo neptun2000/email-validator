@@ -13,6 +13,17 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
 
+const PREDEFINED_EMAILS = [
+  'ashleybhorton@meta.com',
+  'michael.naumov@teva.co.il',
+  'janerose@google.com',
+  'michael@ringsize.ru',
+  'neptun2000@yandex.ru',
+  'vkroz@amazon.com',
+  'mark.maalouf@tevapharm.com',
+  'smquadrat@gmail.com'
+];
+
 const formSchema = z.object({
   emailList: z.string()
     .min(1, "Please enter at least one email address")
@@ -109,6 +120,10 @@ export function BulkEmailValidator() {
     }
   };
 
+  const loadPredefinedEmails = () => {
+    form.setValue('emailList', PREDEFINED_EMAILS.join('\n'));
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     setFileError(null);
     const file = event.target.files?.[0];
@@ -180,6 +195,14 @@ export function BulkEmailValidator() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <div className="flex justify-end gap-2 mb-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={loadPredefinedEmails}
+                className="text-sm"
+              >
+                Load Test Emails
+              </Button>
               <div className="relative">
                 <input
                   type="file"
