@@ -26,6 +26,22 @@ const CORPORATE_DOMAINS = new Set([
   'sap.com'
 ]);
 
+// List of common public email providers
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'yahoo.com',
+  'hotmail.com',
+  'outlook.com',
+  'aol.com',
+  'icloud.com',
+  'protonmail.com',
+  'mail.com',
+  'yandex.com',
+  'yandex.ru',
+  'zoho.com',
+  'live.com'
+]);
+
 interface DmarcRecord {
   policy: string;
   subdomainPolicy?: string;
@@ -40,19 +56,23 @@ interface VerificationResult {
   dmarcPolicy?: string | null;
   logs?: any[];
   isCorporate?: boolean;
-  isCatchAll?: boolean;
+  isPublicEmail?: boolean;
 }
 
 // Rate limiting map to prevent abuse
 const rateLimiter = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 3600000; // 1 hour in milliseconds
-const MAX_ATTEMPTS = 1000; // Increased maximum attempts per hour per IP
+const MAX_ATTEMPTS = 1000; // Maximum attempts per hour per IP
 
 export class EmailVerifier {
   static isCorporateDomain(domain: string): boolean {
     return CORPORATE_DOMAINS.has(domain.toLowerCase()) ||
            domain.endsWith('.edu') ||
            domain.endsWith('.gov');
+  }
+
+  static isPublicEmailDomain(domain: string): boolean {
+    return PUBLIC_EMAIL_DOMAINS.has(domain.toLowerCase());
   }
 
   static async checkRateLimit(ip: string): Promise<boolean> {
@@ -130,6 +150,7 @@ export class EmailVerifier {
     try {
       const dmarcRecord = await this.getDmarcRecord(domain);
       const isCorporate = this.isCorporateDomain(domain);
+      const isPublicEmail = this.isPublicEmailDomain(domain);
       console.log('DMARC record:', dmarcRecord);
 
       const smtpResult = await verifier.verify(email);
@@ -144,7 +165,7 @@ export class EmailVerifier {
           dmarcPolicy: dmarcRecord?.policy ?? null,
           logs: smtpResult.logs,
           isCorporate: true,
-          isCatchAll: true
+          isPublicEmail: false
         };
       }
 
@@ -155,17 +176,20 @@ export class EmailVerifier {
           mxRecord: smtpResult.mxRecord,
           dmarcPolicy: dmarcRecord?.policy ?? null,
           logs: smtpResult.logs,
-          isCorporate
+          isCorporate,
+          isPublicEmail
         };
       }
 
+      const domainType = isCorporate ? 'corporate' : (isPublicEmail ? 'public_email' : 'other');
       return {
         valid: true,
-        reason: isCorporate ? 'Valid corporate email address' : 'Valid email address',
+        reason: `Valid ${domainType} email address`,
         mxRecord: smtpResult.mxRecord,
         dmarcPolicy: dmarcRecord?.policy ?? null,
         logs: smtpResult.logs,
-        isCorporate
+        isCorporate,
+        isPublicEmail
       };
     } catch (error: any) {
       console.error('Verification error:', error);

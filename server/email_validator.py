@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 class EmailValidator:
     def __init__(self):
+        # Corporate domains list
         self.corporate_domains = {
             'amazon.com', 'microsoft.com', 'google.com', 'apple.com',
             'facebook.com', 'meta.com', 'netflix.com', 'oracle.com',
@@ -21,16 +22,28 @@ class EmailValidator:
             'adobe.com', 'vmware.com', 'sap.com'
         }
 
+        # Common public email providers
+        self.public_email_domains = {
+            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
+            'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
+            'yandex.com', 'yandex.ru', 'zoho.com', 'live.com'
+        }
+
         # Common disposable email domains
         self.disposable_domains = {
             'temp-mail.org', 'tempmail.com', 'disposablemail.com', 
             'mailinator.com', 'guerrillamail.com', 'sharklasers.com',
             'throwawaymail.com', '10minutemail.com', 'tempinbox.com',
-            'yopmail.com', 'tempr.email', 'temp-mail.io', 'fake-email.com',
-            'tempmail.net', 'disposable.com', 'mailnesia.com', 'tempmailaddress.com',
-            'tempmail.de', 'dispostable.com', 'spam4.me', 'trashmail.com',
-            'maildrop.cc', 'tempmails.net', 'temporary-mail.net'
+            'yopmail.com', 'tempr.email', 'temp-mail.io', 'fake-email.com'
         }
+
+    def is_public_email_domain(self, domain: str) -> bool:
+        """Check if the email domain is a common public email provider"""
+        return domain.lower() in self.public_email_domains
+
+    def is_corporate_domain(self, domain: str) -> bool:
+        """Check if the email domain is a corporate domain"""
+        return domain.lower() in self.corporate_domains
 
     def extract_name_from_email(self, account: str) -> Dict[str, str]:
         name_parts = re.sub(r'[._]', ' ', account).split()
@@ -46,22 +59,15 @@ class EmailValidator:
             'lastName': 'Unknown'
         }
 
-    def is_disposable_email(self, domain: str) -> bool:
-        """Check if the email domain is a known disposable email provider"""
-        return domain.lower() in self.disposable_domains
-
     def verify_smtp(self, email: str, domain: str, mx_record: str) -> bool:
         """Verify email existence using SMTP check"""
         try:
-            # Set a timeout for the SMTP connection
             smtp = SMTP(timeout=10)
-            smtp.set_debuglevel(0)  # Set to 1 for debugging
+            smtp.set_debuglevel(0)
 
-            # Connect to the MX server
             smtp.connect(mx_record)
-            smtp.helo('test.com')  # Any domain name works for HELO
+            smtp.helo('test.com')
 
-            # Try sending to the email (but don't actually send)
             smtp_from = "test@test.com"
             code, _ = smtp.mail(smtp_from)
             if code != 250:
@@ -70,7 +76,6 @@ class EmailValidator:
             code, _ = smtp.rcpt(email)
             smtp.quit()
 
-            # If we get here without an exception and code is 250, the email exists
             return code == 250
 
         except Exception as e:
@@ -80,30 +85,39 @@ class EmailValidator:
     def verify_email(self, email: str) -> Dict[str, Any]:
         try:
             logger.info(f"Verifying email: {email}")
+
             if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
-                return self._create_error_result(email, "Invalid email format")
-
-            local_part, domain = email.split('@')
-
-            # Check if it's a disposable email
-            if self.is_disposable_email(domain):
                 return {
                     'email': email,
-                    'status': 'invalid',
-                    'subStatus': 'disposable',
-                    'freeEmail': "Yes",
+                    'status': "invalid",
+                    'subStatus': "invalid_format",
+                    'freeEmail': "Unknown",
                     'didYouMean': "",
-                    'account': local_part,
-                    'domain': domain,
+                    'account': "Unknown",
+                    'domain': "Unknown",
                     'domainAgeDays': "Unknown",
                     'smtpProvider': "Unknown",
                     'mxFound': "No",
                     'mxRecord': None,
-                    'firstName': self.extract_name_from_email(local_part)['firstName'],
-                    'lastName': self.extract_name_from_email(local_part)['lastName'],
-                    'message': "Disposable email addresses are not allowed",
+                    'firstName': "Unknown",
+                    'lastName': "Unknown",
+                    'message': "Invalid email format",
                     'isValid': False
                 }
+
+            local_part, domain = email.split('@')
+            name_info = self.extract_name_from_email(local_part)
+
+            # Determine domain type
+            is_corporate = self.is_corporate_domain(domain)
+            is_public = self.is_public_email_domain(domain)
+
+            if is_corporate:
+                domain_type = "Corporate"
+            elif is_public:
+                domain_type = "Public Email Provider"
+            else:
+                domain_type = "Other"
 
             # Check MX records
             try:
@@ -112,13 +126,23 @@ class EmailValidator:
                 mx_found = "Yes"
             except Exception as e:
                 logger.error(f"MX record error for {domain}: {str(e)}")
-                return self._create_error_result(email, "No valid MX records found")
-
-            # Extract name information
-            name_info = self.extract_name_from_email(local_part)
-
-            # Check if it's a corporate domain
-            is_corporate = domain.lower() in self.corporate_domains
+                return {
+                    'email': email,
+                    'status': "invalid",
+                    'subStatus': "no_mx_record",
+                    'freeEmail': "Yes" if is_public else "No",
+                    'didYouMean': "",
+                    'account': local_part,
+                    'domain': domain,
+                    'domainAgeDays': "Unknown",
+                    'smtpProvider': "Unknown",
+                    'mxFound': "No",
+                    'mxRecord': None,
+                    'firstName': name_info['firstName'],
+                    'lastName': name_info['lastName'],
+                    'message': f"No valid MX records found (Domain Type: {domain_type})",
+                    'isValid': False
+                }
 
             # Verify email existence using SMTP
             email_exists = self.verify_smtp(email, domain, mx_record)
@@ -126,9 +150,9 @@ class EmailValidator:
             if not email_exists:
                 return {
                     'email': email,
-                    'status': 'invalid',
-                    'subStatus': 'nonexistent',
-                    'freeEmail': "No",
+                    'status': "invalid",
+                    'subStatus': "nonexistent",
+                    'freeEmail': "Yes" if is_public else "No",
                     'didYouMean': "",
                     'account': local_part,
                     'domain': domain,
@@ -138,16 +162,15 @@ class EmailValidator:
                     'mxRecord': mx_record,
                     'firstName': name_info['firstName'],
                     'lastName': name_info['lastName'],
-                    'message': "Email address does not exist",
+                    'message': f"Email address does not exist (Domain Type: {domain_type})",
                     'isValid': False
                 }
 
-            # For corporate domains or valid emails
             return {
                 'email': email,
-                'status': 'valid',
-                'subStatus': 'corporate_domain' if is_corporate else None,
-                'freeEmail': "No",
+                'status': "valid",
+                'subStatus': domain_type.lower().replace(" ", "_"),
+                'freeEmail': "Yes" if is_public else "No",
                 'didYouMean': "",
                 'account': local_part,
                 'domain': domain,
@@ -157,41 +180,29 @@ class EmailValidator:
                 'mxRecord': mx_record,
                 'firstName': name_info['firstName'],
                 'lastName': name_info['lastName'],
-                'message': "Valid email address",
+                'message': f"Valid email address (Domain Type: {domain_type})",
                 'isValid': True
             }
 
         except Exception as e:
             logger.error(f"Error validating email {email}: {str(e)}")
-            return self._create_error_result(email, str(e))
-
-    def _create_error_result(self, email: str, error_message: str) -> Dict[str, Any]:
-        try:
-            account = email.split('@')[0] if '@' in email else email
-            domain = email.split('@')[1] if '@' in email else "Unknown"
-            name_info = self.extract_name_from_email(account)
-        except Exception:
-            account = "Unknown"
-            domain = "Unknown"
-            name_info = {'firstName': 'Unknown', 'lastName': 'Unknown'}
-
-        return {
-            'email': email,
-            'status': "invalid",
-            'subStatus': "validation_error",
-            'freeEmail': "Unknown",
-            'didYouMean': "",
-            'account': account,
-            'domain': domain,
-            'domainAgeDays': "Unknown",
-            'smtpProvider': "Unknown",
-            'mxFound': "No",
-            'mxRecord': None,
-            'firstName': name_info['firstName'],
-            'lastName': name_info['lastName'],
-            'message': error_message,
-            'isValid': False
-        }
+            return {
+                'email': email,
+                'status': "invalid",
+                'subStatus': "validation_error",
+                'freeEmail': "Unknown",
+                'didYouMean': "",
+                'account': local_part if 'local_part' in locals() else "Unknown",
+                'domain': domain if 'domain' in locals() else "Unknown",
+                'domainAgeDays': "Unknown",
+                'smtpProvider': "Unknown",
+                'mxFound': "No",
+                'mxRecord': None,
+                'firstName': "Unknown",
+                'lastName': "Unknown",
+                'message': str(e),
+                'isValid': False
+            }
 
     def validate_emails(self, emails: List[str]) -> List[Dict[str, Any]]:
         return [self.verify_email(email) for email in emails]
@@ -203,13 +214,11 @@ if __name__ == "__main__":
             emails = json.loads(sys.argv[1])
             logger.info(f"Processing {len(emails)} emails")
         else:
-            # Default test emails if no input provided
             emails = [
-                "test@example.com",
+                "test@hotmail.com",
                 "user@google.com",
                 "invalid.email",
-                "employee@microsoft.com",
-                "test@tempmail.com"
+                "employee@microsoft.com"
             ]
             logger.info("Using default test emails")
 
