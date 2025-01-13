@@ -14,21 +14,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
 
-const PREDEFINED_EMAILS = [
-  'ashleybhorton@meta.com',
-  'michael.naumov@teva.co.il',
-  'janerose@google.com',
-  'michael@ringsize.ru',
-  'neptun2000@yandex.ru',
-  'vkroz@amazon.com',
-  'mark.maalouf@tevapharm.com',
-  'smquadrat@gmail.com'
-];
-
 const formSchema = z.object({
   emailList: z.string()
     .min(1, "Please enter at least one email address")
-    .transform(value => value.split(/[\n,]/).map(email => email.trim()).filter(Boolean))
+    .transform(str => str.split(/[\n,]/).map(email => email.trim()).filter(Boolean))
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -37,6 +26,7 @@ interface ValidationResult {
   email: string;
   status: string;
   subStatus: string | null;
+  confidence: number;
   freeEmail: string;
   didYouMean: string;
   account: string;
@@ -81,8 +71,7 @@ export function BulkEmailValidator() {
     }
   });
 
-  // Query for batch job status
-  const { data: jobStatus } = useQuery({
+  const { data: jobStatus } = useQuery<{ job: BatchJob; results?: ValidationResult[] }>({
     queryKey: ['validationJob', activeJobId],
     queryFn: async () => {
       if (!activeJobId) return null;
@@ -93,25 +82,23 @@ export function BulkEmailValidator() {
       return response.json();
     },
     enabled: !!activeJobId,
-    refetchInterval: (data: any) => {
-      // Check if data exists and has the expected structure
+    refetchInterval: (data) => {
       if (!data?.job || !data.job.status) {
         return false;
       }
-      // Only continue polling if the job is still in progress
       return ['pending', 'processing'].includes(data.job.status) ? 2000 : false;
     },
     onSuccess: (data) => {
       if (!data?.job) return;
 
       if (['completed', 'failed'].includes(data.job.status)) {
-        if (data.job.status === 'completed') {
-          setResults(data.results || []);
+        if (data.job.status === 'completed' && data.results) {
+          setResults(data.results);
           toast({
             title: "Validation Complete",
-            description: `Successfully validated ${data.results?.length || 0} emails`,
+            description: `Successfully validated ${data.results.length} emails`,
           });
-        } else {
+        } else if (data.job.status === 'failed') {
           toast({
             title: "Validation Failed",
             description: data.job.error || "An error occurred during validation",
@@ -137,8 +124,6 @@ export function BulkEmailValidator() {
       }
 
       const result = await response.json();
-
-      // If it's a batch job
       if (result.jobId) {
         setActiveJobId(result.jobId);
         return null;
@@ -181,11 +166,6 @@ export function BulkEmailValidator() {
     }
   };
 
-  const loadPredefinedEmails = () => {
-    form.setValue('emailList', PREDEFINED_EMAILS.join('\n'));
-    updatePreview(PREDEFINED_EMAILS);
-  };
-
   const updatePreview = (emails: string[]) => {
     const preview = emails.map(email => ({
       email,
@@ -218,7 +198,6 @@ export function BulkEmailValidator() {
         return;
       }
 
-      // Extract emails from the first column
       const emails = lines.map(line => line.split(',')[0].trim())
         .filter(Boolean);
 
@@ -227,7 +206,6 @@ export function BulkEmailValidator() {
         return;
       }
 
-      // Update preview before setting the form value
       updatePreview(emails);
       form.setValue('emailList', emails.join('\n'));
     } catch (error) {
@@ -240,10 +218,11 @@ export function BulkEmailValidator() {
     if (results.length === 0) return;
 
     const csvContent = [
-      ['Email', 'Status', 'Message', 'Domain', 'MX Record', 'Is Valid'].join(','),
+      ['Email', 'Status', 'Confidence', 'Message', 'Domain', 'MX Record', 'Is Valid'].join(','),
       ...results.map(result => [
         result.email,
         result.status,
+        result.confidence,
         result.message.replace(/,/g, ';'),
         result.domain,
         result.mxRecord || 'None',
@@ -271,7 +250,16 @@ export function BulkEmailValidator() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={loadPredefinedEmails}
+                onClick={() => {
+                  const testEmails = [
+                    'test@example.com',
+                    'user@google.com',
+                    'invalid.email',
+                    'employee@microsoft.com',
+                  ].join('\n');
+                  form.setValue('emailList', testEmails);
+                  updatePreview(testEmails.split('\n'));
+                }}
                 className="text-sm"
               >
                 Load Test Emails
@@ -430,6 +418,7 @@ export function BulkEmailValidator() {
                 <TableRow>
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Confidence</TableHead>
                   <TableHead>Message</TableHead>
                   <TableHead>Domain</TableHead>
                   <TableHead>MX Record</TableHead>
@@ -441,6 +430,14 @@ export function BulkEmailValidator() {
                     <TableCell>{result.email}</TableCell>
                     <TableCell className={result.isValid ? "text-green-600" : "text-red-600"}>
                       {result.status}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Progress value={result.confidence} className="w-20" />
+                        <span className="text-sm text-muted-foreground">
+                          {result.confidence.toFixed(1)}%
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>{result.domain}</TableCell>
