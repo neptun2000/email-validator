@@ -52,25 +52,27 @@ app.use((req, res, next) => {
     const server = createServer(app);
 
     // Proxy /api requests to Python FastAPI server
-    app.use('/api', createProxyMiddleware({
+    const proxyConfig = {
       target: 'http://localhost:8000',
       changeOrigin: true,
       ws: true,
       pathRewrite: {
-        '^/api': '/api'  // Keep /api prefix when forwarding
+        '^/api': '', // Remove /api prefix when forwarding to FastAPI
       },
-      onProxyReq: (proxyReq, req, res) => {
-        // Log proxy requests for debugging
+      logLevel: 'debug',
+      onProxyReq(proxyReq: any, req: any) {
         log(`Proxying ${req.method} ${req.path} to Python backend`);
       },
-      onError: (err, req, res) => {
+      onError(err: Error, req: Request, res: Response) {
         log(`Proxy error: ${err.message}`);
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
           message: 'Email validation service temporarily unavailable. Please try again in a few moments.'
         }));
       }
-    }));
+    };
+
+    app.use('/api', createProxyMiddleware(proxyConfig));
 
     // Error handling middleware
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -89,9 +91,10 @@ app.use((req, res, next) => {
       serveStatic(app);
     }
 
-    // Start the server
-    server.listen(5000, "0.0.0.0", () => {
-      log(`Frontend server running on port 5000`);
+    // Start the server on port 5000
+    const PORT = 5000;
+    server.listen(PORT, "0.0.0.0", () => {
+      log(`Frontend server running on port ${PORT}`);
     });
 
   } catch (error) {

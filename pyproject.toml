@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "aiofiles>=24.1.0",
     "dnspython>=2.7.0",
     "email-validator>=2.2.0",
     "fastapi>=0.115.6",

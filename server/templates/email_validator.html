@@ -4,7 +4,7 @@
 <div class="max-w-2xl mx-auto">
     <div class="bg-white shadow-sm rounded-lg p-6">
         <h1 class="text-2xl font-bold mb-6">Email Validator</h1>
-        
+
         <form method="POST" action="/validate" class="space-y-4">
             <div>
                 <label for="email" class="block text-sm font-medium text-gray-700">Email Address</label>
@@ -30,6 +30,7 @@
                     <div class="text-sm font-medium text-gray-500">Status:</div>
                     <div class="text-sm text-gray-900 {% if result.isValid %}text-green-600{% else %}text-red-600{% endif %}">
                         {{ result.status.upper() }}
+                        {% if result.subStatus %}({{ result.subStatus }}){% endif %}
                     </div>
 
                     <div class="text-sm font-medium text-gray-500">Message:</div>
@@ -45,6 +46,25 @@
 
                     <div class="text-sm font-medium text-gray-500">MX Record:</div>
                     <div class="text-sm text-gray-900">{{ result.mxRecord or "None" }}</div>
+
+                    <div class="text-sm font-medium text-gray-500">DMARC Policy:</div>
+                    <div class="text-sm text-gray-900">
+                        {% if result.dmarcPolicy %}
+                            <span class="px-2 py-1 text-xs font-medium rounded-full 
+                                {% if result.dmarcPolicy == 'reject' %}bg-red-100 text-red-800
+                                {% elif result.dmarcPolicy == 'quarantine' %}bg-yellow-100 text-yellow-800
+                                {% else %}bg-green-100 text-green-800{% endif %}">
+                                {{ result.dmarcPolicy }}
+                            </span>
+                        {% else %}
+                            <span class="text-gray-500">Not configured</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="text-sm font-medium text-gray-500">Disposable Email:</div>
+                    <div class="text-sm {% if result.disposable %}text-red-600{% else %}text-green-600{% endif %}">
+                        {{ "Yes" if result.disposable else "No" }}
+                    </div>
 
                     <div class="text-sm font-medium text-gray-500">Confidence:</div>
                     <div class="text-sm text-gray-900">

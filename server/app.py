@@ -8,14 +8,22 @@ from email_validator import validate_email as validate_email_lib, EmailNotValidE
 import dns.resolver
 import asyncio
 from pathlib import Path
+import re
 
 app = FastAPI(title="Email Validation Platform")
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-# Mount static files
-static_path = Path(__file__).parent / "static"
-static_path.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+# Configure template and static directories
+base_dir = Path(__file__).parent
+templates_dir = base_dir / "templates"
+static_dir = base_dir / "static"
+
+# Ensure directories exist
+templates_dir.mkdir(exist_ok=True)
+static_dir.mkdir(exist_ok=True)
+
+# Setup templates and static files
+templates = Jinja2Templates(directory=str(templates_dir))
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Configure CORS
 app.add_middleware(
@@ -54,25 +62,47 @@ class ValidationResult(BaseModel):
     message: str
     isValid: bool
     confidence: float
+    disposable: bool
+    dmarcPolicy: Optional[str] = None
 
-# Updated free email providers list
+# List of known free email providers
 FREE_EMAIL_PROVIDERS = {
-    'gmail.com',
-    'yahoo.com',
-    'hotmail.com',
-    'outlook.com',
-    'live.com',
-    'aol.com',
-    'mail.com',
-    'protonmail.com',
-    'icloud.com',
-    'yandex.com',
-    'zoho.com',
-    'gmx.com',
-    'msn.com'
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+    'aol.com', 'mail.com', 'protonmail.com', 'icloud.com', 'yandex.com',
+    'zoho.com', 'gmx.com', 'msn.com'
 }
 
+# List of known disposable email domains
+DISPOSABLE_EMAIL_DOMAINS = {
+    'tempmail.com', 'throwawaymail.com', 'mailinator.com', '10minutemail.com',
+    'guerrillamail.com', 'sharklasers.com', 'getairmail.com', 'yopmail.com',
+    'tempmail.net', 'temp-mail.org', 'fakeinbox.com', 'trash-mail.com',
+    'mt2015.com', 'meltmail.com', 'harakirimail.com', 'mailnesia.com'
+}
+
+async def check_dmarc_policy(domain: str) -> Optional[str]:
+    """Check DMARC policy for a domain"""
+    try:
+        dmarc_domain = f"_dmarc.{domain}"
+        dmarc_records = dns.resolver.resolve(dmarc_domain, 'TXT')
+        for record in dmarc_records:
+            for string in record.strings:
+                dmarc_record = string.decode('utf-8')
+                if dmarc_record.startswith('v=DMARC1'):
+                    # Extract policy
+                    match = re.search(r'p=(\w+)', dmarc_record)
+                    if match:
+                        return match.group(1)
+        return None
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return None
+    except Exception:
+        return None
+
 async def validate_single_email(email: str) -> ValidationResult:
+    """
+    Validate a single email address with comprehensive checks
+    """
     try:
         # First validate the email format
         validation = validate_email_lib(email, check_deliverability=False)
@@ -80,7 +110,8 @@ async def validate_single_email(email: str) -> ValidationResult:
         domain = validation.domain.lower()
         account = validation.local_part
 
-        # Determine email provider type
+        # Check if it's a disposable email
+        is_disposable = domain in DISPOSABLE_EMAIL_DOMAINS
         is_free_email = domain in FREE_EMAIL_PROVIDERS
 
         try:
@@ -89,23 +120,37 @@ async def validate_single_email(email: str) -> ValidationResult:
             mx_record = str(mx_records[0].exchange) if mx_records else None
             has_mx = bool(mx_record)
 
+            # Check DMARC policy
+            dmarc_policy = await check_dmarc_policy(domain)
+
             # Calculate confidence score
             confidence = 80 if has_mx else 20
             if domain in FREE_EMAIL_PROVIDERS:
                 confidence = 95  # Higher confidence for well-known providers
+            if is_disposable:
+                confidence = 10  # Very low confidence for disposable emails
+            if dmarc_policy:
+                confidence += 5  # Bonus for having DMARC policy
 
             # Determine status
-            status = "valid" if has_mx else "invalid"
-            sub_status = None if has_mx else "no_mx_record"
-
-            # Prepare validation message
-            message = "Valid email address"
-            if not has_mx:
+            if is_disposable:
+                status = "invalid"
+                sub_status = "disposable_email"
+                message = "Disposable email addresses are not allowed"
+                is_valid = False
+            elif not has_mx:
+                status = "invalid"
+                sub_status = "no_mx_record"
                 message = "Domain has no valid MX records"
-            elif is_free_email:
-                message = "Valid free email provider"
+                is_valid = False
             else:
-                message = "Valid corporate email"
+                status = "valid"
+                sub_status = None
+                is_valid = True
+                if is_free_email:
+                    message = "Valid free email provider"
+                else:
+                    message = "Valid corporate email"
 
             return ValidationResult(
                 status=status,
@@ -121,8 +166,10 @@ async def validate_single_email(email: str) -> ValidationResult:
                 firstName=None,
                 lastName=None,
                 message=message,
-                isValid=has_mx,
-                confidence=confidence
+                isValid=is_valid,
+                confidence=confidence,
+                disposable=is_disposable,
+                dmarcPolicy=dmarc_policy
             )
 
         except dns.resolver.NXDOMAIN:
@@ -141,7 +188,9 @@ async def validate_single_email(email: str) -> ValidationResult:
                 lastName=None,
                 message="Domain does not exist",
                 isValid=False,
-                confidence=0
+                confidence=0,
+                disposable=False,
+                dmarcPolicy=None
             )
 
     except EmailNotValidError as e:
@@ -161,16 +210,20 @@ async def validate_single_email(email: str) -> ValidationResult:
             lastName=None,
             message=str(e),
             isValid=False,
-            confidence=0
+            confidence=0,
+            disposable=False,
+            dmarcPolicy=None
         )
 
 # Web UI routes
 @app.get("/")
 async def home(request: Request):
+    """Render the main page"""
     return templates.TemplateResponse("email_validator.html", {"request": request})
 
 @app.post("/validate")
 async def validate_email_form(request: Request, email: str = Form(...)):
+    """Handle form submission and validate single email"""
     result = await validate_single_email(email)
     return templates.TemplateResponse("email_validator.html", {
         "request": request,
@@ -196,4 +249,4 @@ async def validate_multiple_emails(request: EmailsRequest) -> List[ValidationRes
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
