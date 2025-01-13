@@ -1,15 +1,16 @@
 import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Mail, Loader2, X, Upload, Download, Eye, EyeOff } from "lucide-react";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { z } from "zod";
 import { isValidEmailFormat } from "@/lib/validation";
 
@@ -28,18 +29,6 @@ const formSchema = z.object({
   emailList: z.string()
     .min(1, "Please enter at least one email address")
     .transform(value => value.split(/[\n,]/).map(email => email.trim()).filter(Boolean))
-    .refine(
-      emails => emails.length > 0,
-      "Please enter at least one valid email address"
-    )
-    .refine(
-      emails => emails.length <= 100,
-      "Maximum 100 emails allowed per request"
-    )
-    .refine(
-      emails => emails.every(email => isValidEmailFormat(email)),
-      "One or more email addresses are invalid"
-    )
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -68,11 +57,20 @@ interface PreviewEmail {
   error?: string;
 }
 
+interface BatchJob {
+  id: number;
+  status: string;
+  totalEmails: number;
+  processedEmails: number;
+  error?: string;
+}
+
 export function BulkEmailValidator() {
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [previewEmails, setPreviewEmails] = useState<PreviewEmail[]>([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -83,9 +81,47 @@ export function BulkEmailValidator() {
     }
   });
 
+  // Query for batch job status
+  const { data: jobStatus, refetch: refetchJobStatus } = useQuery({
+    queryKey: ['validationJob', activeJobId],
+    queryFn: async () => {
+      if (!activeJobId) return null;
+      const response = await fetch(`/api/validate-emails/batch/${activeJobId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch job status');
+      }
+      return response.json();
+    },
+    enabled: !!activeJobId,
+    refetchInterval: (data) => {
+      if (!data || ['completed', 'failed'].includes(data.job.status)) {
+        return false;
+      }
+      return 2000; // Poll every 2 seconds for active jobs
+    },
+    onSuccess: (data) => {
+      if (data && ['completed', 'failed'].includes(data.job.status)) {
+        if (data.job.status === 'completed') {
+          setResults(data.results);
+          toast({
+            title: "Validation Complete",
+            description: `Successfully validated ${data.results.length} emails`,
+          });
+        } else {
+          toast({
+            title: "Validation Failed",
+            description: data.job.error || "An error occurred during validation",
+            variant: "destructive",
+          });
+        }
+        setActiveJobId(null);
+      }
+    },
+  });
+
   const validateEmails = useMutation({
     mutationFn: async (data: { emailList: string[] }) => {
-      const response = await fetch("/api/validate-emails", {
+      const response = await fetch("/api/validate-emails/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emails: data.emailList }),
@@ -96,16 +132,24 @@ export function BulkEmailValidator() {
         throw new Error(errorText);
       }
 
-      return response.json() as Promise<ValidationResult[]>;
+      const result = await response.json();
+
+      // If it's a batch job
+      if (result.jobId) {
+        setActiveJobId(result.jobId);
+        return null;
+      }
+
+      return result;
     },
     onSuccess: (data) => {
-      setResults(data);
-      setPreviewEmails([]);
-      setShowPreview(false);
-      toast({
-        title: "Validation Complete",
-        description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
-      });
+      if (data) {
+        setResults(data);
+        toast({
+          title: "Validation Complete",
+          description: `Successfully validated ${data.length} email${data.length === 1 ? '' : 's'}`,
+        });
+      }
     },
     onError: (error: Error) => {
       setResults([]);
@@ -127,6 +171,7 @@ export function BulkEmailValidator() {
     setFileError(null);
     setPreviewEmails([]);
     setShowPreview(false);
+    setActiveJobId(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -163,6 +208,7 @@ export function BulkEmailValidator() {
     try {
       const text = await file.text();
       const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+
       if (lines.length === 0) {
         setFileError('CSV file is empty');
         return;
@@ -174,11 +220,6 @@ export function BulkEmailValidator() {
 
       if (emails.length === 0) {
         setFileError('No email addresses found in the CSV');
-        return;
-      }
-
-      if (emails.length > 100) {
-        setFileError('Maximum 100 emails allowed per request');
         return;
       }
 
@@ -312,6 +353,20 @@ export function BulkEmailValidator() {
               </div>
             )}
 
+            {activeJobId && jobStatus?.job && (
+              <Alert>
+                <AlertTitle>Processing {jobStatus.job.totalEmails} emails</AlertTitle>
+                <AlertDescription>
+                  <div className="space-y-2">
+                    <Progress value={(jobStatus.job.processedEmails / jobStatus.job.totalEmails) * 100} />
+                    <p className="text-sm text-muted-foreground">
+                      Processed {jobStatus.job.processedEmails} of {jobStatus.job.totalEmails} emails
+                    </p>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
             <FormField
               control={form.control}
               name="emailList"
@@ -323,7 +378,7 @@ export function BulkEmailValidator() {
                         {...field}
                         placeholder="Enter email addresses (one per line) or upload a CSV file"
                         className="min-h-[100px] pl-10 pr-8"
-                        disabled={validateEmails.isPending}
+                        disabled={validateEmails.isPending || !!activeJobId}
                       />
                       <Mail className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
                       {field.value && (
@@ -333,7 +388,7 @@ export function BulkEmailValidator() {
                           size="sm"
                           className="absolute right-2 top-2 h-5 w-5 p-0"
                           onClick={clearForm}
-                          disabled={validateEmails.isPending}
+                          disabled={validateEmails.isPending || !!activeJobId}
                         >
                           <X className="h-4 w-4" />
                         </Button>
@@ -348,12 +403,12 @@ export function BulkEmailValidator() {
             <Button 
               type="submit" 
               className="w-full"
-              disabled={validateEmails.isPending}
+              disabled={validateEmails.isPending || !!activeJobId}
             >
-              {validateEmails.isPending ? (
+              {validateEmails.isPending || activeJobId ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Validating emails...
+                  {activeJobId ? "Processing..." : "Validating emails..."}
                 </>
               ) : (
                 "Validate Emails"
