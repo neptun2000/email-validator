@@ -1,6 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const app = express();
 app.use(express.json());
@@ -51,7 +51,15 @@ app.use((req, res, next) => {
 (async () => {
   try {
     log("Starting server...");
-    const server = registerRoutes(app);
+
+    // Proxy /api requests to Python FastAPI server
+    app.use('/api', createProxyMiddleware({
+      target: 'http://localhost:8000',
+      changeOrigin: true,
+      pathRewrite: {
+        '^/api': '/api', // Keep /api prefix
+      },
+    }));
 
     // Error handling middleware
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -64,17 +72,17 @@ app.use((req, res, next) => {
     // Set up Vite in development or serve static files in production
     if (app.get("env") === "development") {
       log("Setting up Vite for development...");
+      const server = app.listen(5000, "0.0.0.0", () => {
+        log(`Frontend server running on port 5000`);
+      });
       await setupVite(app, server);
     } else {
       log("Setting up static file serving for production...");
       serveStatic(app);
+      app.listen(5000, "0.0.0.0", () => {
+        log(`Frontend server running on port 5000`);
+      });
     }
-
-    // Start the server
-    const PORT = parseInt(process.env.PORT || "5000");
-    server.listen(PORT, "0.0.0.0", () => {
-      log(`Server running on port ${PORT}`);
-    });
 
   } catch (error) {
     console.error('Failed to start server:', error);
