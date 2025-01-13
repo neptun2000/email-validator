@@ -1,6 +1,6 @@
 import dns from 'dns';
 import { promisify } from 'util';
-import { EmailVerifier } from './email-verifier';
+import { EmailVerifier } from './email-verifier.js';
 
 const resolveMx = promisify(dns.resolveMx);
 
@@ -75,4 +75,22 @@ function extractNameFromEmail(account) {
     firstName: nameParts[0] || 'Unknown',
     lastName: 'Unknown'
   };
+}
+
+// Handle worker messages if running as a worker
+import { parentPort, workerData } from 'worker_threads';
+if (parentPort) {
+  (async () => {
+    try {
+      const { email, clientIp } = workerData;
+      const result = await validateEmailForWorker(email, clientIp);
+      parentPort.postMessage({ success: true, result });
+    } catch (error) {
+      console.error('Worker error:', error);
+      parentPort.postMessage({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
+    }
+  })();
 }
