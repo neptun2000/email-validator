@@ -5,6 +5,8 @@ import re
 import json
 import sys
 import logging
+import socket
+from smtplib import SMTP
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +35,33 @@ class EmailValidator:
             'lastName': 'Unknown'
         }
 
+    def verify_smtp(self, email: str, domain: str, mx_record: str) -> bool:
+        """Verify email existence using SMTP check"""
+        try:
+            # Set a timeout for the SMTP connection
+            smtp = SMTP(timeout=10)
+            smtp.set_debuglevel(0)  # Set to 1 for debugging
+
+            # Connect to the MX server
+            smtp.connect(mx_record)
+            smtp.helo('test.com')  # Any domain name works for HELO
+
+            # Try sending to the email (but don't actually send)
+            smtp_from = "test@test.com"
+            code, _ = smtp.mail(smtp_from)
+            if code != 250:
+                return False
+
+            code, _ = smtp.rcpt(email)
+            smtp.quit()
+
+            # If we get here without an exception and code is 250, the email exists
+            return code == 250
+
+        except Exception as e:
+            logger.error(f"SMTP verification failed for {email}: {str(e)}")
+            return False
+
     def verify_email(self, email: str) -> Dict[str, Any]:
         try:
             logger.info(f"Verifying email: {email}")
@@ -56,13 +85,14 @@ class EmailValidator:
             # Check if it's a corporate domain
             is_corporate = domain.lower() in self.corporate_domains
 
-            # For demo purposes, we'll consider corporate domains as valid
-            if is_corporate:
-                logger.info(f"Corporate domain detected: {domain}")
+            # Verify email existence using SMTP
+            email_exists = self.verify_smtp(email, domain, mx_record)
+
+            if not email_exists:
                 return {
                     'email': email,
-                    'status': 'valid',
-                    'subStatus': 'corporate_domain',
+                    'status': 'invalid',
+                    'subStatus': 'nonexistent',
                     'freeEmail': "No",
                     'didYouMean': "",
                     'account': local_part,
@@ -73,17 +103,16 @@ class EmailValidator:
                     'mxRecord': mx_record,
                     'firstName': name_info['firstName'],
                     'lastName': name_info['lastName'],
-                    'message': "Valid corporate email address",
-                    'isValid': True
+                    'message': "Email address does not exist",
+                    'isValid': False
                 }
 
-            # For non-corporate domains, perform basic validation
-            logger.info(f"Regular domain validation: {domain}")
+            # For corporate domains or valid emails
             return {
                 'email': email,
                 'status': 'valid',
-                'subStatus': None,
-                'freeEmail': "Yes",
+                'subStatus': 'corporate_domain' if is_corporate else None,
+                'freeEmail': "No",
                 'didYouMean': "",
                 'account': local_part,
                 'domain': domain,
